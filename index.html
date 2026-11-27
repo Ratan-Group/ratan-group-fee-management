@@ -107,5 +107,52 @@ db.auth.getSession().then(({data})=>{
   if(data.session) loadDashboard(data.session.user.id);
 });
 </script>
-</body>
+</bo
+<!-- STUDENT MANAGEMENT -->
+<div id="studentManagement" style="display:none; padding:20px; background:#f5f7fb; border-radius:10px; margin-top:20px;">
+  <h2>Student Management</h2>
+
+  <button onclick="showStudentForm()">+ Add Student</button>
+  <button onclick="loadStudents()">Student List</button>
+
+  <div id="studentMessage" style="margin:12px 0;"></div>
+
+  <div id="studentForm" style="display:none; background:white; padding:15px; margin-top:15px; border-radius:8px;">
+    <h3>New Student Admission</h3>
+
+    <label>Institution</label>
+    <select id="stInstitution" style="width:100%;padding:10px;margin:6px 0;"></select>
+
+    <label>Academic Session</label>
+    <select id="stSession" style="width:100%;padding:10px;margin:6px 0;"></select>
+
+    <label>Class / Course</label>
+    <select id="stClass" style="width:100%;padding:10px;margin:6px 0;"></select>
+
+    <input id="stAdmission" placeholder="Admission Number" style="width:100%;padding:10px;margin:6px 0;">
+    <input id="stName" placeholder="Student Full Name" style="width:100%;padding:10px;margin:6px 0;">
+    <input id="stFather" placeholder="Father Name" style="width:100%;padding:10px;margin:6px 0;">
+    <input id="stMother" placeholder="Mother Name" style="width:100%;padding:10px;margin:6px 0;">
+    <input id="stMobile" placeholder="Mobile Number" style="width:100%;padding:10px;margin:6px 0;">
+    <input id="stGuardian" placeholder="Guardian Mobile" style="width:100%;padding:10px;margin:6px 0;">
+    <input id="stDOB" type="date" style="width:100%;padding:10px;margin:6px 0;">
+    <select id="stGender" style="width:100%;padding:10px;margin:6px 0;">
+      <option value="">Select Gender</option>
+      <option>Male</option>
+      <option>Female</option>
+      <option>Other</option>
+    </select>
+    <input id="stRoll" placeholder="Roll Number" style="width:100%;padding:10px;margin:6px 0;">
+    <input id="stMedium" placeholder="Medium (Hindi / English)" style="width:100%;padding:10px;margin:6px 0;">
+    <textarea id="stAddress" placeholder="Full Address" style="width:100%;padding:10px;margin:6px 0;"></textarea>
+    <label><input type="checkbox" id="stTransport"> Transport Required</label>
+    <input id="stBus" placeholder="Bus Route" style="width:100%;padding:10px;margin:6px 0;">
+    <input id="stPrevious" placeholder="Previous School" style="width:100%;padding:10px;margin:6px 0;">
+
+    <button onclick="saveStudent()">Save Student</button>
+  </div>
+
+  <div id="studentResults"></div>
+</div>
+  dy>
 </html>
