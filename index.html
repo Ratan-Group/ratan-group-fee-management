@@ -601,3 +601,132 @@ if (institutionList) {
 }
 </script>
 
+
+<script>
+async function loadStudents() {
+  const institutionId = document.getElementById('stInstitution').value;
+  const search = document.getElementById('studentSearch').value.trim();
+  const results = document.getElementById('studentResults');
+
+  if (!institutionId) {
+    results.textContent = 'Please select institution.';
+    return;
+  }
+
+  let query = db.from('students')
+    .select('id, admission_no, full_name, father_name, mobile, address, roll_no')
+    .eq('institution_id', institutionId)
+    .order('full_name');
+
+  if (search) {
+    query = query.or(
+      'full_name.ilike.%' + search + '%,admission_no.ilike.%' +
+      search + '%,mobile.ilike.%' + search + '%'
+    );
+  }
+
+  const { data, error } = await query;
+  results.innerHTML = '';
+
+  if (error) {
+    results.textContent = 'Error: ' + error.message;
+    return;
+  }
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'Student List (' + data.length + ')';
+  results.appendChild(heading);
+
+  data.forEach(student => {
+    const card = document.createElement('div');
+    card.style.cssText =
+      'background:white;padding:12px;margin:10px 0;border-radius:8px;border:1px solid #ddd;';
+
+    const info = document.createElement('p');
+    info.textContent =
+      student.admission_no + ' | ' + student.full_name +
+      ' | Father: ' + student.father_name +
+      ' | Mobile: ' + student.mobile;
+
+    const view = document.createElement('button');
+    view.textContent = 'View';
+    view.onclick = () => viewStudent(student);
+
+    const edit = document.createElement('button');
+    edit.textContent = 'Edit';
+    edit.style.marginLeft = '6px';
+    edit.onclick = () => editStudent(student);
+
+    const del = document.createElement('button');
+    del.textContent = 'Delete';
+    del.style.marginLeft = '6px';
+    del.onclick = () => deleteStudent(student.id, student.full_name);
+
+    card.append(info, view, edit, del);
+    results.appendChild(card);
+  });
+
+  if (data.length === 0) {
+    results.append('No students found.');
+  }
+}
+
+function viewStudent(s) {
+  alert(
+    'Admission: ' + s.admission_no +
+    '\nName: ' + s.full_name +
+    '\nFather: ' + s.father_name +
+    '\nMobile: ' + s.mobile +
+    '\nRoll No: ' + (s.roll_no || '') +
+    '\nAddress: ' + (s.address || '')
+  );
+}
+
+async function editStudent(s) {
+  const name = prompt('Student Name:', s.full_name);
+  if (name === null) return;
+
+  const father = prompt('Father Name:', s.father_name);
+  if (father === null) return;
+
+  const mobile = prompt('Mobile:', s.mobile);
+  if (mobile === null) return;
+
+  if (!name.trim() || !father.trim() || !mobile.trim()) {
+    alert('Name, Father Name and Mobile are required.');
+    return;
+  }
+
+  const { error } = await db.from('students')
+    .update({
+      full_name: name.trim(),
+      father_name: father.trim(),
+      mobile: mobile.trim()
+    })
+    .eq('id', s.id);
+
+  if (error) {
+    alert('Update Error: ' + error.message);
+    return;
+  }
+
+  alert('Student updated successfully.');
+  await loadStudents();
+}
+
+async function deleteStudent(id, name) {
+  if (!confirm('Are you sure you want to delete ' + name + '?')) return;
+
+  const { error } = await db.from('students')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    alert('Delete Error: ' + error.message);
+    return;
+  }
+
+  alert('Student deleted successfully.');
+  await loadStudents();
+}
+</script>
