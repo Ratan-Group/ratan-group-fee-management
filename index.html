@@ -1,1 +1,111 @@
 
+
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ratan Group Fee Management</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+body{font-family:Arial,sans-serif;background:#f1f5f9;margin:0;color:#172554}
+header{background:#123b70;color:white;padding:22px;text-align:center}
+main{max-width:650px;margin:30px auto;padding:15px}
+.card{background:white;padding:22px;border-radius:12px;box-shadow:0 2px 12px #0001;margin-bottom:18px}
+input,button{box-sizing:border-box;width:100%;padding:13px;margin:8px 0;border-radius:7px;border:1px solid #cbd5e1;font-size:16px}
+button{background:#1765b1;color:white;border:0;font-weight:bold}
+button.secondary{background:#475569}
+.hidden{display:none}
+.item{padding:12px;background:#eff6ff;border-radius:8px;margin:8px 0}
+</style>
+</head>
+<body>
+<header>
+<h2>RATAN GROUP</h2>
+<p>School & College Fee Management System</p>
+</header>
+<main>
+<section id="login" class="card">
+<h3>Admin Login</h3>
+<input id="email" type="email" placeholder="Email Address">
+<input id="password" type="password" placeholder="Password">
+<button onclick="loginUser()">Login</button>
+<p id="message"></p>
+</section>
+
+<section id="dashboard" class="card hidden">
+<h2>Welcome to Dashboard</h2>
+<h3 id="userName"></h3>
+<p id="userRole"></p>
+<div id="institutionList"></div>
+<button class="secondary" onclick="logoutUser()">Logout</button>
+</section>
+</main>
+
+<script>
+const SUPABASE_URL = "https://foycurwdcudglaoeggcx.supabase.co";
+const SUPABASE_KEY = "sb_publishable_APIOXMjD-OLDgI9pHmHwbw_Yo_1qXUn";
+
+const db = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+async function loginUser(){
+  const email=document.getElementById("email").value.trim();
+  const password=document.getElementById("password").value;
+  const msg=document.getElementById("message");
+  msg.textContent="Logging in...";
+
+  const {data,error}=await db.auth.signInWithPassword({email,password});
+  if(error){msg.textContent="Login Error: "+error.message;return;}
+  await loadDashboard(data.user.id);
+}
+
+async function loadDashboard(userId){
+  const {data:profile,error}=await db
+    .from("user_profiles")
+    .select("full_name,role,institution_id")
+    .eq("user_id",userId)
+    .single();
+
+  if(error){
+    document.getElementById("message").textContent=error.message;
+    return;
+  }
+
+  document.getElementById("login").classList.add("hidden");
+  document.getElementById("dashboard").classList.remove("hidden");
+  document.getElementById("userName").textContent=profile.full_name;
+  document.getElementById("userRole").textContent="Role: "+profile.role;
+
+  const list=document.getElementById("institutionList");
+
+  if(profile.role==="super_admin"){
+    const {data:institutions,error:instError}=await db
+      .from("institutions").select("name,code").order("name");
+    if(instError){list.textContent=instError.message;return;}
+    list.innerHTML="<h3>All Institutions</h3>";
+    institutions.forEach(item=>{
+      const div=document.createElement("div");
+      div.className="item";
+      div.textContent=item.name+" ("+item.code+")";
+      list.appendChild(div);
+    });
+  } else {
+    const {data:institution,error:instError}=await db
+      .from("institutions").select("name,code")
+      .eq("id",profile.institution_id).single();
+    list.textContent=instError ? instError.message :
+      "Institution: "+institution.name+" ("+institution.code+")";
+  }
+}
+
+async function logoutUser(){
+  await db.auth.signOut();
+  location.reload();
+}
+
+db.auth.getSession().then(({data})=>{
+  if(data.session) loadDashboard(data.session.user.id);
+});
+</script>
+</body>
+</html>
