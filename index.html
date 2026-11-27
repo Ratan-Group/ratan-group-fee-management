@@ -1918,4 +1918,263 @@ async function deleteStudent(id, name) {
   }
 })();
 </script>
+<script>
+(function () {
+  async function setupFeeDueList() {
+    const root = document.getElementById("studentManagement");
+    if (!root) {
+      setTimeout(setupFeeDueList, 500);
+      return;
+    }
+    if (document.getElementById("feeDueListPanel")) return;
 
+    root.insertAdjacentHTML("beforeend", `
+      <div id="feeDueListPanel" style="margin-top:25px;padding:15px;border:1px solid #ccc;border-radius:10px">
+        <h3>Student Fee Due List</h3>
+        <button type="button" id="fdOpen">Open Fee Due List</button>
+
+        <div id="fdArea" style="display:none;margin-top:15px">
+          <label>Institution</label>
+          <select id="fdInstitution" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <label>Academic Session</label>
+          <select id="fdSession" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <label>Student (Optional)</label>
+          <select id="fdStudent" style="width:100%;padding:10px;margin:5px 0">
+            <option value="">All Students</option>
+          </select>
+
+          <button type="button" id="fdLoad">Show Fee Due</button>
+          <p id="fdMessage"></p>
+          <div id="fdSummary"></div>
+          <div id="fdResults" style="overflow-x:auto"></div>
+        </div>
+      </div>
+    `);
+
+    const $ = id => document.getElementById(id);
+    const msg = (s, color = "black") => {
+      $("fdMessage").textContent = s;
+      $("fdMessage").style.color = color;
+    };
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;",
+        '"': "&quot;", "'": "&#39;"
+      })[c]);
+    }
+
+    function money(n) {
+      return Number(n || 0).toLocaleString("en-IN", {
+        maximumFractionDigits: 2
+      });
+    }
+
+    $("fdOpen").onclick = async () => {
+      $("fdArea").style.display = "block";
+      await loadInstitutions();
+    };
+
+    $("fdInstitution").onchange = loadSessions;
+    $("fdSession").onchange = loadStudents;
+    $("fdLoad").onclick = loadDueList;
+
+    async function loadInstitutions() {
+      msg("Loading institutions...");
+      const { data: auth } = await db.auth.getUser();
+      if (!auth?.user) return msg("Please login again.", "red");
+
+      const { data: profile, error: pe } = await db
+        .from("user_profiles")
+        .select("role,institution_id")
+        .eq("user_id", auth.user.id)
+        .single();
+
+      if (pe || !profile) return msg("Profile error: " + (pe?.message || ""), "red");
+
+      let q = db.from("institutions").select("id,name").order("name");
+      if (!String(profile.role).toLowerCase().includes("super")) {
+        q = q.eq("id", profile.institution_id);
+      }
+
+      const { data, error } = await q;
+      if (error) return msg("Institution error: " + error.message, "red");
+
+      $("fdInstitution").innerHTML = (data || [])
+        .map(x => `<option value="${x.id}">${esc(x.name)}</option>`)
+        .join("");
+
+      if (!data?.length) return msg("Institution nahi mila.", "red");
+      await loadSessions();
+    }
+
+    async function loadSessions() {
+      const iid = $("fdInstitution").value;
+      if (!iid) return;
+
+      const { data, error } = await db
+        .from("academic_sessions")
+        .select("id,session_name")
+        .eq("institution_id", iid)
+        .order("session_name", { ascending: false });
+
+      if (error) return msg("Session error: " + error.message, "red");
+
+      $("fdSession").innerHTML = (data || [])
+        .map(x => `<option value="${x.id}">${esc(x.session_name)}</option>`)
+        .join("");
+
+      await loadStudents();
+    }
+
+    async function loadStudents() {
+      const iid = $("fdInstitution").value;
+      const sid = $("fdSession").value;
+      if (!iid || !sid) return;
+
+      const { data, error } = await db.from("students")
+        .select("id,admission_no,full_name")
+        .eq("institution_id", iid)
+        .eq("session_id", sid)
+        .order("full_name");
+
+      if (error) return msg("Student error: " + error.message, "red");
+
+      $("fdStudent").innerHTML = '<option value="">All Students</option>' +
+        (data || []).map(s =>
+          `<option value="${s.id}">${esc(s.admission_no)} - ${esc(s.full_name)}</option>`
+        ).join("");
+
+      msg("Options loaded. Show Fee Due par click karein.", "green");
+      $("fdResults").innerHTML = "";
+      $("fdSummary").innerHTML = "";
+    }
+
+    async function loadDueList() {
+      const iid = $("fdInstitution").value;
+      const sid = $("fdSession").value;
+      const selectedStudent = $("fdStudent").value;
+
+      if (!iid || !sid) return msg("Institution aur Session select karein.", "red");
+
+      $("fdLoad").disabled = true;
+      msg("Fee Due List load ho rahi hai...");
+
+      try {
+        let q = db.from("student_charges")
+          .select("id,student_id,fee_head_id,description,amount,due_date,frequency,period_start,period_end")
+          .eq("institution_id", iid)
+          .eq("session_id", sid)
+          .order("due_date");
+
+        if (selectedStudent) q = q.eq("student_id", selectedStudent);
+
+        const { data: charges, error: chargeError } = await q;
+        if (chargeError) throw chargeError;
+
+        if (!charges?.length) {
+          $("fdSummary").innerHTML = "";
+          $("fdResults").innerHTML = "Is selection ke liye koi Fee Due record nahi mila.";
+          return msg("No Fee Due records found.", "orange");
+        }
+
+        const studentIds = [...new Set(charges.map(x => x.student_id))];
+        const headIds = [...new Set(charges.map(x => x.fee_head_id))];
+        const chargeIds = charges.map(x => x.id);
+
+        const [studentResult, headResult, allocationResult] = await Promise.all([
+          db.from("students")
+            .select("id,admission_no,full_name")
+            .in("id", studentIds),
+
+          db.from("fee_heads")
+            .select("id,name")
+            .in("id", headIds),
+
+          db.from("payment_allocations")
+            .select("charge_id,amount")
+            .eq("institution_id", iid)
+            .in("charge_id", chargeIds)
+        ]);
+
+        if (studentResult.error) throw studentResult.error;
+        if (headResult.error) throw headResult.error;
+        if (allocationResult.error) throw allocationResult.error;
+
+        const studentMap = Object.fromEntries(
+          (studentResult.data || []).map(x => [x.id, x])
+        );
+        const headMap = Object.fromEntries(
+          (headResult.data || []).map(x => [x.id, x.name])
+        );
+
+        const paidMap = {};
+        (allocationResult.data || []).forEach(x => {
+          paidMap[x.charge_id] = (paidMap[x.charge_id] || 0) + Number(x.amount || 0);
+        });
+
+        let total = 0, paid = 0, balance = 0;
+
+        const rows = charges.map((c, i) => {
+          const student = studentMap[c.student_id] || {};
+          const amount = Number(c.amount || 0);
+          const paidAmount = paidMap[c.id] || 0;
+          const remaining = Math.max(0, amount - paidAmount);
+
+          total += amount;
+          paid += paidAmount;
+          balance += remaining;
+
+          return `<tr>
+            <td>${i + 1}</td>
+            <td>${esc(student.admission_no || "")}</td>
+            <td>${esc(student.full_name || "Unknown")}</td>
+            <td>${esc(headMap[c.fee_head_id] || "Fee")}</td>
+            <td>${esc(c.frequency || "")}</td>
+            <td>${esc(c.description || "")}</td>
+            <td>${esc(c.due_date || "")}</td>
+            <td>₹${money(amount)}</td>
+            <td>₹${money(paidAmount)}</td>
+            <td><b>₹${money(remaining)}</b></td>
+          </tr>`;
+        }).join("");
+
+        $("fdSummary").innerHTML = `
+          <div style="padding:12px;background:#f1f5f9;border-radius:8px;margin:10px 0">
+            <b>Total Fee:</b> ₹${money(total)} &nbsp; | &nbsp;
+            <b>Paid:</b> ₹${money(paid)} &nbsp; | &nbsp;
+            <b>Balance:</b> ₹${money(balance)}
+          </div>`;
+
+        $("fdResults").innerHTML = `
+          <table border="1" cellpadding="7" cellspacing="0"
+            style="border-collapse:collapse;width:100%;font-size:13px">
+            <thead>
+              <tr>
+                <th>#</th><th>Admission No.</th><th>Student</th>
+                <th>Fee Head</th><th>Frequency</th><th>Description</th>
+                <th>Due Date</th><th>Total</th><th>Paid</th><th>Balance</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+
+        msg(`Success! ${charges.length} Fee Due records loaded.`, "green");
+
+      } catch (e) {
+        msg("Error: " + (e.message || e), "red");
+      } finally {
+        $("fdLoad").disabled = false;
+      }
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", setupFeeDueList);
+  } else {
+    setupFeeDueList();
+  }
+})();
+</script>
