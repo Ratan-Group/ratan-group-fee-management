@@ -1303,3 +1303,261 @@ async function deleteStudent(id, name) {
 })();
             </script>
             
+<script>
+(function () {
+  async function setupStudentFeeSettings() {
+    const root = document.getElementById("studentManagement");
+    if (!root) {
+      setTimeout(setupStudentFeeSettings, 500);
+      return;
+    }
+
+    if (document.getElementById("studentFeeSettingsPanel")) return;
+
+    root.insertAdjacentHTML("beforeend", `
+      <div style="margin-top:25px;padding:15px;border:1px solid #ccc;border-radius:10px">
+        <h3>Student Fee Settings</h3>
+        <button type="button" id="openStudentFeeSettings">
+          विद्यार्थी की फीस सेटिंग खोलें
+        </button>
+
+        <div id="studentFeeSettingsArea" style="display:none;margin-top:15px">
+          <label>Institution</label>
+          <select id="sfsInstitution" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <label>Academic Session</label>
+          <select id="sfsSession" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <label>Student</label>
+          <select id="sfsStudent" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <label>Fee Head</label>
+          <select id="sfsFeeHead" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <label>Payment Frequency</label>
+          <select id="sfsFrequency" style="width:100%;padding:10px;margin:5px 0">
+            <option value="Monthly">Monthly</option>
+            <option value="Quarterly">Quarterly</option>
+            <option value="Half Yearly">Half Yearly</option>
+            <option value="Annual">Annual</option>
+            <option value="One Time">One Time</option>
+          </select>
+
+          <button type="button" id="saveStudentFeeSetting">
+            Save Fee Setting
+          </button>
+
+          <p id="sfsMessage"></p>
+          <h4>Saved Fee Settings</h4>
+          <div id="sfsList"></div>
+        </div>
+      </div>
+    `);
+
+    const $ = id => document.getElementById(id);
+    const msg = (text, color = "black") => {
+      $("sfsMessage").textContent = text;
+      $("sfsMessage").style.color = color;
+    };
+
+    let allowedInstitutionIds = [];
+
+    $("openStudentFeeSettings").onclick = async () => {
+      $("studentFeeSettingsArea").style.display = "block";
+      await loadInstitutions();
+    };
+
+    $("sfsInstitution").onchange = loadSessions;
+    $("sfsSession").onchange = loadStudents;
+    $("sfsStudent").onchange = loadSavedSettings;
+
+    async function loadInstitutions() {
+      msg("Loading institutions...");
+      const { data: authData, error: authError } =
+        await db.auth.getUser();
+
+      if (authError || !authData.user) {
+        msg("Please login again.", "red");
+        return;
+      }
+
+      const { data: profile, error: profileError } = await db
+        .from("user_profiles")
+        .select("role,institution_id")
+        .eq("user_id", authData.user.id)
+        .single();
+
+      if (profileError || !profile) {
+        msg("User profile nahi mila.", "red");
+        return;
+      }
+
+      let query = db.from("institutions").select("id,name").order("name");
+
+      if (!String(profile.role).toLowerCase().includes("super")) {
+        query = query.eq("id", profile.institution_id);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        msg("Institution load error: " + error.message, "red");
+        return;
+      }
+
+      allowedInstitutionIds = (data || []).map(x => x.id);
+      $("sfsInstitution").innerHTML = (data || [])
+        .map(x => `<option value="${x.id}">${x.name}</option>`)
+        .join("");
+
+      if (!data || !data.length) {
+        msg("Koi institution nahi mila.", "red");
+        return;
+      }
+
+      await loadSessions();
+    }
+
+    async function loadSessions() {
+      const institutionId = $("sfsInstitution").value;
+      if (!institutionId) return;
+
+      const { data, error } = await db
+        .from("academic_sessions")
+        .select("id,session_name")
+        .eq("institution_id", institutionId)
+        .order("session_name", { ascending: false });
+
+      if (error) {
+        msg("Session error: " + error.message, "red");
+        return;
+      }
+
+      $("sfsSession").innerHTML = (data || [])
+        .map(x => `<option value="${x.id}">${x.session_name}</option>`)
+        .join("");
+
+      await loadStudents();
+    }
+
+    async function loadStudents() {
+      const institutionId = $("sfsInstitution").value;
+      const sessionId = $("sfsSession").value;
+      if (!institutionId || !sessionId) return;
+
+      const { data, error } = await db
+        .from("students")
+        .select("id,admission_no,full_name")
+        .eq("institution_id", institutionId)
+        .eq("session_id", sessionId)
+        .eq("active", true)
+        .order("full_name");
+
+      if (error) {
+        msg("Student error: " + error.message, "red");
+        return;
+      }
+
+      $("sfsStudent").innerHTML =
+        '<option value="">Select Student</option>' +
+        (data || []).map(x =>
+          `<option value="${x.id}">${x.admission_no || ""} - ${x.full_name}</option>`
+        ).join("");
+
+      const { data: heads, error: headError } = await db
+        .from("fee_heads")
+        .select("id,name")
+        .eq("institution_id", institutionId)
+        .order("name");
+
+      if (headError) {
+        msg("Fee Head error: " + headError.message, "red");
+        return;
+      }
+
+      $("sfsFeeHead").innerHTML = (heads || [])
+        .map(x => `<option value="${x.id}">${x.name}</option>`)
+        .join("");
+
+      $("sfsList").innerHTML = "";
+      msg("Students and Fee Heads loaded.", "green");
+    }
+
+    async function loadSavedSettings() {
+      const studentId = $("sfsStudent").value;
+      const sessionId = $("sfsSession").value;
+      if (!studentId || !sessionId) {
+        $("sfsList").innerHTML = "";
+        return;
+      }
+
+      const { data, error } = await db
+        .from("student_fee_settings")
+        .select("id,frequency,active,fee_heads(name)")
+        .eq("student_id", studentId)
+        .eq("session_id", sessionId)
+        .order("created_at");
+
+      if (error) {
+        msg("Settings load error: " + error.message, "red");
+        return;
+      }
+
+      $("sfsList").innerHTML = (data || []).map(x =>
+        `<div style="padding:8px;border-bottom:1px solid #ddd">
+          ${x.fee_heads?.name || "Fee"} — ${x.frequency}
+          ${x.active ? " (Active)" : " (Inactive)"}
+        </div>`
+      ).join("") || "Abhi koi setting save nahi hai.";
+    }
+
+    $("saveStudentFeeSetting").onclick = async () => {
+      const institutionId = $("sfsInstitution").value;
+      const sessionId = $("sfsSession").value;
+      const studentId = $("sfsStudent").value;
+      const feeHeadId = $("sfsFeeHead").value;
+      const frequency = $("sfsFrequency").value;
+
+      if (!institutionId || !sessionId || !studentId || !feeHeadId) {
+        msg("Institution, Session, Student aur Fee Head select karein.", "red");
+        return;
+      }
+
+      if (!allowedInstitutionIds.includes(institutionId)) {
+        msg("Institution access allowed nahi hai.", "red");
+        return;
+      }
+
+      msg("Saving...");
+
+      const { error } = await db
+        .from("student_fee_settings")
+        .upsert({
+          institution_id: institutionId,
+          session_id: sessionId,
+          student_id: studentId,
+          fee_head_id: feeHeadId,
+          frequency: frequency,
+          active: true
+        }, {
+          onConflict: "student_id,session_id,fee_head_id"
+        });
+
+      if (error) {
+        msg("Save error: " + error.message, "red");
+        return;
+      }
+
+      msg("Fee Setting Successfully Saved!", "green");
+      await loadSavedSettings();
+    };
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", setupStudentFeeSettings);
+  } else {
+    setupStudentFeeSettings();
+  }
+})();
+</script>
+
