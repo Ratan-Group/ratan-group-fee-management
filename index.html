@@ -155,4 +155,439 @@ db.auth.getSession().then(({data})=>{
   <div id="studentResults"></div>
 </div>
   dy>
+  
+<script>
+async function initStudentManagement() {
+  const { data: profile, error } = await db
+    .from('user_profiles')
+    .select('institution_id, role')
+    .eq('user_id', (await db.auth.getUser()).data.user.id)
+    .single();
+
+  if (error) {
+    alert('Profile load error: ' + error.message);
+    return;
+  }
+
+  window.studentProfile = profile;
+
+  const instSelect = document.getElementById('stInstitution');
+  const { data: institutions, error: instError } = await db
+    .from('institutions')
+    .select('id, name')
+    .order('name');
+
+  if (instError) {
+    alert(instError.message);
+    return;
+  }
+
+  instSelect.innerHTML = '';
+
+  (institutions || []).forEach(item => {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.name;
+    instSelect.appendChild(option);
+  });
+
+  if (profile.role !== 'super_admin') {
+    instSelect.value = profile.institution_id;
+    instSelect.disabled = true;
+  }
+
+  await loadStudentSessions();
+}
+
+async function loadStudentSessions() {
+  const institutionId = document.getElementById('stInstitution').value;
+  const sessionSelect = document.getElementById('stSession');
+  const classSelect = document.getElementById('stClass');
+
+  sessionSelect.innerHTML = '<option value="">Loading sessions...</option>';
+  classSelect.innerHTML = '<option value="">Select session first</option>';
+
+  const { data, error } = await db
+    .from('academic_sessions')
+    .select('id, session_name')
+    .eq('institution_id', institutionId)
+    .order('session_name');
+
+  if (error) {
+    sessionSelect.innerHTML = '<option value="">Session error</option>';
+    document.getElementById('studentMessage').textContent = error.message;
+    return;
+  }
+
+  sessionSelect.innerHTML = '<option value="">Select Session</option>';
+
+  (data || []).forEach(item => {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.session_name;
+    sessionSelect.appendChild(option);
+  });
+}
+
+async function loadStudentClasses() {
+  const institutionId = document.getElementById('stInstitution').value;
+  const sessionId = document.getElementById('stSession').value;
+  const classSelect = document.getElementById('stClass');
+
+  const { data, error } = await db
+    .from('classes_courses')
+    .select('id, name')
+    .eq('institution_id', institutionId)
+    .order('name');
+
+  if (error) {
+    document.getElementById('studentMessage').textContent = error.message;
+    return;
+  }
+
+  classSelect.innerHTML = '<option value="">Select Class / Course</option>';
+
+  (data || []).forEach(item => {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.name;
+    classSelect.appendChild(option);
+  });
+}
+
+function showStudentForm() {
+  document.getElementById('studentForm').style.display = 'block';
+  document.getElementById('studentResults').innerHTML = '';
+  initStudentManagement();
+}
+
+async function saveStudent() {
+  const institutionId = document.getElementById('stInstitution').value;
+  const sessionId = document.getElementById('stSession').value;
+  const classId = document.getElementById('stClass').value;
+
+  const student = {
+    institution_id: institutionId,
+    session_id: sessionId,
+    class_course_id: classId,
+    admission_no: document.getElementById('stAdmission').value.trim(),
+    full_name: document.getElementById('stName').value.trim(),
+    father_name: document.getElementById('stFather').value.trim(),
+    mother_name: document.getElementById('stMother').value.trim() || null,
+    mobile: document.getElementById('stMobile').value.trim(),
+    guardian_mobile: document.getElementById('stGuardian').value.trim() || null,
+    date_of_birth: document.getElementById('stDOB').value || null,
+    gender: document.getElementById('stGender').value || null,
+    roll_no: document.getElementById('stRoll').value.trim() || null,
+    medium: document.getElementById('stMedium').value.trim() || null,
+    address: document.getElementById('stAddress').value.trim(),
+    transport_required: document.getElementById('stTransport').checked,
+    bus_route: document.getElementById('stBus').value.trim() || null,
+    previous_school: document.getElementById('stPrevious').value.trim() || null,
+    admission_date: new Date().toISOString().slice(0, 10),
+    active: true
+  };
+
+  if (!institutionId || !sessionId || !classId ||
+      !student.admission_no || !student.full_name ||
+      !student.father_name || !student.mobile) {
+    alert('Institution, Session, Class, Admission No, Student Name, Father Name and Mobile are required.');
+    return;
+  }
+
+  const { error } = await db.from('students').insert(student);
+
+  if (error) {
+    alert('Student save error: ' + error.message);
+    return;
+  }
+
+  alert('Student successfully saved!');
+  document.getElementById('studentForm').reset();
+  await loadStudents();
+}
+
+async function loadStudents() {
+  const institutionId = document.getElementById('stInstitution').value;
+
+  const { data, error } = await db
+    .from('students')
+    .select('admission_no, full_name, father_name, mobile')
+    .eq('institution_id', institutionId)
+    .order('full_name');
+
+  const results = document.getElementById('studentResults');
+
+  if (error) {
+    results.textContent = 'Error: ' + error.message;
+    return;
+  }
+
+  results.innerHTML = '<h3>Student List</h3>';
+
+  (data || []).forEach(student => {
+    const item = document.createElement('p');
+    item.textContent =
+      student.admission_no + ' - ' +
+      student.full_name + ' - ' +
+      student.father_name + ' - ' +
+      student.mobile;
+    results.appendChild(item);
+  });
+}
+
+document.getElementById('stInstitution')
+  .addEventListener('change', loadStudentSessions);
+
+document.getElementById('stSession')
+  .addEventListener('change', loadStudentClasses);
+</script>
 </html>
+
+<script>
+let studentInitialized = false;
+
+async function initStudentManagement() {
+  const msg = document.getElementById('studentMessage');
+  msg.textContent = 'Loading...';
+
+  const { data: authData, error: authError } = await db.auth.getUser();
+  if (authError || !authData.user) {
+    msg.textContent = 'Please login again.';
+    return;
+  }
+
+  const { data: profile, error } = await db
+    .from('user_profiles')
+    .select('institution_id, role')
+    .eq('user_id', authData.user.id)
+    .single();
+
+  if (error) {
+    msg.textContent = 'Profile error: ' + error.message;
+    return;
+  }
+
+  window.studentProfile = profile;
+
+  const { data: institutions, error: instError } = await db
+    .from('institutions')
+    .select('*')
+    .order('name');
+
+  if (instError) {
+    msg.textContent = 'Institution error: ' + instError.message;
+    return;
+  }
+
+  const instSelect = document.getElementById('stInstitution');
+  instSelect.innerHTML = '<option value="">Select Institution</option>';
+
+  const isSuperAdmin = String(profile.role || '')
+    .toLowerCase().includes('super');
+
+  (institutions || []).forEach(item => {
+    if (!isSuperAdmin && item.id !== profile.institution_id) return;
+
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.name || item.institution_name || item.code || item.id;
+    instSelect.appendChild(option);
+  });
+
+  if (!isSuperAdmin) {
+    instSelect.value = profile.institution_id;
+    instSelect.disabled = true;
+  } else {
+    instSelect.disabled = false;
+  }
+
+  studentInitialized = true;
+  msg.textContent = 'Institution loaded successfully.';
+  if (instSelect.value) await loadStudentSessions();
+}
+
+async function loadStudentSessions() {
+  const institutionId = document.getElementById('stInstitution').value;
+  const sessionSelect = document.getElementById('stSession');
+  const classSelect = document.getElementById('stClass');
+
+  sessionSelect.innerHTML = '<option value="">Select Session</option>';
+  classSelect.innerHTML = '<option value="">Select Class / Course</option>';
+
+  if (!institutionId) return;
+
+  const { data, error } = await db
+    .from('academic_sessions')
+    .select('id, session_name')
+    .eq('institution_id', institutionId)
+    .order('session_name');
+
+  if (error) {
+    document.getElementById('studentMessage').textContent = error.message;
+    return;
+  }
+
+  (data || []).forEach(item => {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.session_name;
+    sessionSelect.appendChild(option);
+  });
+
+  await loadStudentClasses();
+}
+
+async function loadStudentClasses() {
+  const institutionId = document.getElementById('stInstitution').value;
+  const classSelect = document.getElementById('stClass');
+
+  classSelect.innerHTML = '<option value="">Select Class / Course</option>';
+  if (!institutionId) return;
+
+  const { data, error } = await db
+    .from('classes_courses')
+    .select('id, name')
+    .eq('institution_id', institutionId)
+    .order('name');
+
+  if (error) {
+    document.getElementById('studentMessage').textContent = error.message;
+    return;
+  }
+
+  (data || []).forEach(item => {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.name;
+    classSelect.appendChild(option);
+  });
+}
+
+async function showStudentManagement() {
+  document.getElementById('studentManagement').style.display = 'block';
+  document.getElementById('studentForm').style.display = 'none';
+  document.getElementById('studentResults').innerHTML = '';
+
+  await initStudentManagement();
+}
+
+async function showStudentForm() {
+  document.getElementById('studentForm').style.display = 'block';
+  document.getElementById('studentResults').innerHTML = '';
+  if (!studentInitialized) await initStudentManagement();
+}
+
+async function saveStudent() {
+  const msg = document.getElementById('studentMessage');
+  msg.textContent = 'Saving student...';
+
+  const student = {
+    institution_id: document.getElementById('stInstitution').value,
+    session_id: document.getElementById('stSession').value,
+    class_course_id: document.getElementById('stClass').value,
+    admission_no: document.getElementById('stAdmission').value.trim(),
+    full_name: document.getElementById('stName').value.trim(),
+    father_name: document.getElementById('stFather').value.trim(),
+    mother_name: document.getElementById('stMother').value.trim() || null,
+    mobile: document.getElementById('stMobile').value.trim(),
+    guardian_mobile: document.getElementById('stGuardian').value.trim() || null,
+    date_of_birth: document.getElementById('stDOB').value || null,
+    gender: document.getElementById('stGender').value || null,
+    roll_no: document.getElementById('stRoll').value.trim() || null,
+    medium: document.getElementById('stMedium').value.trim() || null,
+    address: document.getElementById('stAddress').value.trim(),
+    transport_required: document.getElementById('stTransport').checked,
+    bus_route: document.getElementById('stBus').value.trim() || null,
+    previous_school: document.getElementById('stPrevious').value.trim() || null,
+    admission_date: new Date().toISOString().slice(0, 10),
+    active: true
+  };
+
+  if (!student.institution_id || !student.session_id ||
+      !student.class_course_id || !student.admission_no ||
+      !student.full_name || !student.father_name || !student.mobile) {
+    msg.textContent = 'Please fill all required fields.';
+    return;
+  }
+
+  const { error } = await db.from('students').insert(student);
+
+  if (error) {
+    msg.textContent = 'Save error: ' + error.message;
+    return;
+  }
+
+  msg.textContent = 'Student saved successfully!';
+
+  [
+    'stAdmission', 'stName', 'stFather', 'stMother',
+    'stMobile', 'stGuardian', 'stDOB', 'stRoll',
+    'stMedium', 'stAddress', 'stBus', 'stPrevious'
+  ].forEach(id => document.getElementById(id).value = '');
+
+  document.getElementById('stGender').value = '';
+  document.getElementById('stTransport').checked = false;
+
+  await loadStudents();
+}
+
+async function loadStudents() {
+  const institutionId = document.getElementById('stInstitution').value;
+  const results = document.getElementById('studentResults');
+
+  if (!institutionId) {
+    results.textContent = 'Please select institution.';
+    return;
+  }
+
+  const { data, error } = await db
+    .from('students')
+    .select('admission_no, full_name, father_name, mobile')
+    .eq('institution_id', institutionId)
+    .order('full_name');
+
+  results.innerHTML = '';
+
+  if (error) {
+    results.textContent = 'List error: ' + error.message;
+    return;
+  }
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'Student List';
+  results.appendChild(heading);
+
+  (data || []).forEach(student => {
+    const item = document.createElement('p');
+    item.textContent =
+      student.admission_no + ' | ' +
+      student.full_name + ' | ' +
+      student.father_name + ' | ' +
+      student.mobile;
+    results.appendChild(item);
+  });
+
+  if (!data || data.length === 0) {
+    results.append('No students found.');
+  }
+}
+
+document.getElementById('stInstitution')
+  .addEventListener('change', loadStudentSessions);
+
+document.getElementById('stSession')
+  .addEventListener('change', loadStudentClasses);
+
+// Add Student Management button to existing dashboard
+const institutionList = document.getElementById('institutionList');
+
+if (institutionList) {
+  const btn = document.createElement('button');
+  btn.textContent = 'Student Management';
+  btn.style.margin = '12px 0';
+  btn.onclick = showStudentManagement;
+  institutionList.insertAdjacentElement('afterend', btn);
+}
+</script>
+
