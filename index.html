@@ -1561,3 +1561,361 @@ async function deleteStudent(id, name) {
 })();
 </script>
 
+<script>
+(function () {
+  async function setupFeeGeneration() {
+    const root = document.getElementById("studentManagement");
+    if (!root) {
+      setTimeout(setupFeeGeneration, 500);
+      return;
+    }
+    if (document.getElementById("feeGenerationPanel")) return;
+
+    root.insertAdjacentHTML("beforeend", `
+      <div id="feeGenerationPanel" style="margin-top:25px;padding:15px;border:1px solid #ccc;border-radius:10px">
+        <h3>Fee Generation</h3>
+        <button type="button" id="fgOpen">Open Fee Generation</button>
+
+        <div id="fgArea" style="display:none;margin-top:15px">
+          <label>Institution</label>
+          <select id="fgInstitution" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <label>Academic Session</label>
+          <select id="fgSession" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <label>Generation Type</label>
+          <select id="fgType" style="width:100%;padding:10px;margin:5px 0">
+            <option value="individual">Individual Student</option>
+            <option value="bulk">Bulk Students</option>
+          </select>
+
+          <div id="fgStudentBox">
+            <label>Select Student</label>
+            <select id="fgStudent" style="width:100%;padding:10px;margin:5px 0"></select>
+          </div>
+
+          <div id="fgClassBox" style="display:none">
+            <label>Select Class (All Classes ke liye blank chhodein)</label>
+            <select id="fgClass" style="width:100%;padding:10px;margin:5px 0"></select>
+          </div>
+
+          <button type="button" id="fgGenerate" style="margin-top:10px">
+            Generate Fees
+          </button>
+
+          <p id="fgMessage"></p>
+          <div id="fgResults"></div>
+        </div>
+      </div>
+    `);
+
+    const $ = id => document.getElementById(id);
+    const msg = (s, color = "black") => {
+      $("fgMessage").textContent = s;
+      $("fgMessage").style.color = color;
+    };
+
+    $("fgOpen").onclick = async () => {
+      $("fgArea").style.display = "block";
+      await loadInstitutions();
+    };
+
+    $("fgInstitution").onchange = loadSessions;
+    $("fgSession").onchange = loadStudentsAndClasses;
+    $("fgType").onchange = () => {
+      const bulk = $("fgType").value === "bulk";
+      $("fgStudentBox").style.display = bulk ? "none" : "block";
+      $("fgClassBox").style.display = bulk ? "block" : "none";
+    };
+
+    async function loadInstitutions() {
+      msg("Loading...");
+      const { data: auth } = await db.auth.getUser();
+      if (!auth?.user) return msg("Please login again.", "red");
+
+      const { data: profile, error: pe } = await db
+        .from("user_profiles")
+        .select("role,institution_id")
+        .eq("user_id", auth.user.id)
+        .single();
+
+      if (pe || !profile) return msg("Profile error: " + (pe?.message || ""), "red");
+
+      let q = db.from("institutions").select("id,name").order("name");
+      if (!String(profile.role).toLowerCase().includes("super")) {
+        q = q.eq("id", profile.institution_id);
+      }
+
+      const { data, error } = await q;
+      if (error) return msg("Institution error: " + error.message, "red");
+
+      $("fgInstitution").innerHTML = (data || [])
+        .map(x => `<option value="${x.id}">${x.name}</option>`).join("");
+
+      if (!data?.length) return msg("Institution nahi mila.", "red");
+      await loadSessions();
+    }
+
+    async function loadSessions() {
+      const iid = $("fgInstitution").value;
+      const { data, error } = await db.from("academic_sessions")
+        .select("id,session_name,start_date,end_date")
+        .eq("institution_id", iid)
+        .order("start_date", { ascending: false });
+
+      if (error) return msg("Session error: " + error.message, "red");
+
+      $("fgSession").innerHTML = (data || []).map(x =>
+        `<option value="${x.id}" data-start="${x.start_date}" data-end="${x.end_date}">
+          ${x.session_name}
+        </option>`
+      ).join("");
+
+      await loadStudentsAndClasses();
+    }
+
+    async function loadStudentsAndClasses() {
+      const iid = $("fgInstitution").value;
+      const sid = $("fgSession").value;
+      if (!iid || !sid) return;
+
+      const { data: students, error: se } = await db.from("students")
+        .select("id,admission_no,full_name")
+        .eq("institution_id", iid)
+        .eq("session_id", sid)
+        .eq("active", true)
+        .order("full_name");
+
+      if (se) return msg("Student error: " + se.message, "red");
+
+      $("fgStudent").innerHTML = (students || []).map(s =>
+        `<option value="${s.id}">${s.admission_no || ""} - ${s.full_name}</option>`
+      ).join("");
+
+      const { data: classes, error: ce } = await db.from("classes_courses")
+        .select("id,name")
+        .eq("institution_id", iid)
+        .order("name");
+
+      if (ce) return msg("Class error: " + ce.message, "red");
+
+      $("fgClass").innerHTML = '<option value="">All Classes</option>' +
+        (classes || []).map(c =>
+          `<option value="${c.id}">${c.name}</option>`
+        ).join("");
+
+      msg("Students and Classes loaded.", "green");
+    }
+
+    function isoDate(d) {
+      return d.toISOString().slice(0, 10);
+    }
+
+    function addMonths(date, months) {
+      const d = new Date(date + "T00:00:00Z");
+      const day = d.getUTCDate();
+      d.setUTCDate(1);
+      d.setUTCMonth(d.getUTCMonth() + months);
+      const last = new Date(Date.UTC(
+        d.getUTCFullYear(), d.getUTCMonth() + 1, 0
+      )).getUTCDate();
+      d.setUTCDate(Math.min(day, last));
+      return d;
+    }
+
+    function makePeriods(start, end, frequency) {
+      const months = {
+        "Monthly": 1,
+        "Quarterly": 3,
+        "Half Yearly": 6,
+        "Annual": 12
+      };
+
+      if (frequency === "One Time") {
+        return [{ start, end, due: start }];
+      }
+
+      const step = months[frequency];
+      if (!step) return [];
+
+      const periods = [];
+      let cursor = new Date(start + "T00:00:00Z");
+
+      while (isoDate(cursor) <= end && periods.length < 24) {
+        const next = addMonths(isoDate(cursor), step);
+        const lastDay = new Date(next);
+        lastDay.setUTCDate(lastDay.getUTCDate() - 1);
+
+        const periodEnd = isoDate(lastDay) > end ? end : isoDate(lastDay);
+        periods.push({
+          start: isoDate(cursor),
+          end: periodEnd,
+          due: periodEnd
+        });
+
+        cursor = next;
+      }
+      return periods;
+    }
+
+    $("fgGenerate").onclick = async () => {
+      const iid = $("fgInstitution").value;
+      const sid = $("fgSession").value;
+      const type = $("fgType").value;
+      const studentId = $("fgStudent").value;
+      const classId = $("fgClass").value;
+
+      if (!iid || !sid) return msg("Institution aur Session select karein.", "red");
+      if (type === "individual" && !studentId) return msg("Student select karein.", "red");
+
+      const sessionOption = $("fgSession").selectedOptions[0];
+      const start = sessionOption?.dataset.start;
+      const end = sessionOption?.dataset.end;
+      if (!start || !end) return msg("Session ki dates nahi mili.", "red");
+
+      const confirmed = confirm(
+        "Selected students ki Fee Due entries generate karni hain? Existing entries dobara nahi banengi."
+      );
+      if (!confirmed) return;
+
+      $("fgGenerate").disabled = true;
+      $("fgResults").innerHTML = "";
+      msg("Fee generation chal rahi hai...");
+
+      try {
+        let sq = db.from("students")
+          .select("id,full_name,admission_no,class_course_id")
+          .eq("institution_id", iid)
+          .eq("session_id", sid)
+          .eq("active", true);
+
+        if (type === "individual") sq = sq.eq("id", studentId);
+        else if (classId) sq = sq.eq("class_course_id", classId);
+
+        const { data: students, error: studentError } = await sq;
+        if (studentError) throw studentError;
+        if (!students?.length) throw new Error("Selected students nahi mile.");
+
+        const studentIds = students.map(s => s.id);
+
+        const { data: settings, error: settingsError } = await db
+          .from("student_fee_settings")
+          .select("student_id,fee_head_id,frequency")
+          .eq("institution_id", iid)
+          .eq("session_id", sid)
+          .eq("active", true)
+          .in("student_id", studentIds);
+
+        if (settingsError) throw settingsError;
+        if (!settings?.length) throw new Error("Students ki Fee Settings pehle save karein.");
+
+        const classIds = [...new Set(students.map(s => s.class_course_id).filter(Boolean))];
+
+        const { data: plans, error: planError } = await db
+          .from("fee_plans")
+          .select("id,class_course_id,fee_head_id,amount,frequency")
+          .eq("institution_id", iid)
+          .eq("session_id", sid)
+          .in("class_course_id", classIds);
+
+        if (planError) throw planError;
+
+        const { data: existing, error: existingError } = await db
+          .from("student_charges")
+          .select("student_id,fee_head_id,period_start")
+          .eq("institution_id", iid)
+          .eq("session_id", sid)
+          .in("student_id", studentIds);
+
+        if (existingError) throw existingError;
+
+        const existingKeys = new Set((existing || []).map(x =>
+          `${x.student_id}|${x.fee_head_id}|${x.period_start}`
+        ));
+
+        const rows = [];
+        let noPlan = 0;
+        let already = 0;
+
+        for (const student of students) {
+          const studentSettings = settings.filter(x => x.student_id === student.id);
+
+          for (const setting of studentSettings) {
+            const plan = (plans || []).find(p =>
+              p.class_course_id === student.class_course_id &&
+              p.fee_head_id === setting.fee_head_id &&
+              p.frequency === setting.frequency
+            );
+
+            if (!plan || Number(plan.amount) <= 0) {
+              noPlan++;
+              continue;
+            }
+
+            const periods = makePeriods(start, end, setting.frequency);
+
+            for (const period of periods) {
+              const key = `${student.id}|${setting.fee_head_id}|${period.start}`;
+
+              if (existingKeys.has(key)) {
+                already++;
+                continue;
+              }
+
+              rows.push({
+                institution_id: iid,
+                student_id: student.id,
+                fee_head_id: setting.fee_head_id,
+                session_id: sid,
+                fee_plan_id: plan.id,
+                frequency: setting.frequency,
+                period_start: period.start,
+                period_end: period.end,
+                due_date: period.due,
+                description: `${setting.frequency} Fee (${period.start} to ${period.end})`,
+                amount: Number(plan.amount)
+              });
+
+              existingKeys.add(key);
+            }
+          }
+        }
+
+        if (!rows.length) {
+          msg(`New fees nahi bani. Already existing: ${already}, Fee Plan missing: ${noPlan}.`, "orange");
+          return;
+        }
+
+        let inserted = 0;
+        for (let i = 0; i < rows.length; i += 100) {
+          const batch = rows.slice(i, i + 100);
+          const { error } = await db.from("student_charges").insert(batch);
+          if (error) throw new Error(
+            `Save error: ${error.message}. Pehle ke kuch records save ho sakte hain.`
+          );
+          inserted += batch.length;
+        }
+
+        msg(
+          `Success! New Fee Due: ${inserted} | Already Existing: ${already} | Fee Plan Missing: ${noPlan}`,
+          "green"
+        );
+
+        $("fgResults").textContent =
+          `Processed Students: ${students.length}. New Fee Due Entries: ${inserted}.`;
+      } catch (e) {
+        msg("Error: " + (e.message || e), "red");
+      } finally {
+        $("fgGenerate").disabled = false;
+      }
+    };
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", setupFeeGeneration);
+  } else {
+    setupFeeGeneration();
+  }
+})();
+</script>
+
