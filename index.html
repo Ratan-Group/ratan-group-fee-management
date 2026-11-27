@@ -152,7 +152,17 @@ db.auth.getSession().then(({data})=>{
     <button onclick="saveStudent()">Save Student</button>
   </div>
 
-  <div id="studentResults"></div>
+
+<div style="margin-top:15px;">
+  <input
+    type="text"
+    id="studentSearch"
+    placeholder="Search by Name, Admission No. or Mobile"
+    oninput="loadStudents()"
+    style="width:100%;padding:12px;margin-bottom:12px;"
+  >
+</div>
+<div id="studentResults"></div>
 </div>
   dy>
   
