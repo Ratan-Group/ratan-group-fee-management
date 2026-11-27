@@ -2178,3 +2178,379 @@ async function deleteStudent(id, name) {
   }
 })();
 </script>
+<script>
+(function () {
+  async function setupFeeCollection() {
+    const root = document.getElementById("studentManagement");
+    if (!root) {
+      setTimeout(setupFeeCollection, 500);
+      return;
+    }
+    if (document.getElementById("feeCollectionPanel")) return;
+
+    root.insertAdjacentHTML("beforeend", `
+      <div id="feeCollectionPanel" style="margin-top:25px;padding:15px;border:1px solid #ccc;border-radius:10px">
+        <h3>Fee Collection & Receipt</h3>
+        <button type="button" id="fcOpen">Open Fee Collection</button>
+
+        <div id="fcArea" style="display:none;margin-top:15px">
+          <label>Institution</label>
+          <select id="fcInstitution" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <label>Academic Session</label>
+          <select id="fcSession" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <label>Search Student</label>
+          <input id="fcSearch" placeholder="Name / Admission No." style="width:100%;padding:10px;margin:5px 0">
+
+          <label>Select Student</label>
+          <select id="fcStudent" style="width:100%;padding:10px;margin:5px 0"></select>
+
+          <button type="button" id="fcLoadDue">Show Outstanding Fees</button>
+          <div id="fcDueSummary" style="margin:12px 0"></div>
+          <div id="fcDueList" style="overflow-x:auto"></div>
+
+          <hr>
+          <h4>Receive Payment</h4>
+
+          <label>Payment Amount (₹)</label>
+          <input id="fcAmount" type="number" min="0.01" step="0.01"
+            placeholder="Enter amount" style="width:100%;padding:10px;margin:5px 0">
+
+          <label>Payment Date</label>
+          <input id="fcDate" type="date" style="width:100%;padding:10px;margin:5px 0">
+
+          <label>Payment Mode</label>
+          <select id="fcMode" style="width:100%;padding:10px;margin:5px 0">
+            <option value="Cash">Cash</option>
+            <option value="UPI">UPI</option>
+            <option value="Bank Transfer">Bank Transfer</option>
+            <option value="Cheque">Cheque</option>
+          </select>
+
+          <label>Transaction Reference (Optional)</label>
+          <input id="fcReference" placeholder="UPI ID / Cheque No." style="width:100%;padding:10px;margin:5px 0">
+
+          <label>Remarks (Optional)</label>
+          <input id="fcRemarks" placeholder="Payment remarks" style="width:100%;padding:10px;margin:5px 0">
+
+          <button type="button" id="fcCollect" style="margin-top:10px">
+            Collect Fee & Generate Receipt
+          </button>
+
+          <p id="fcMessage"></p>
+          <div id="fcReceiptResult"></div>
+        </div>
+      </div>
+    `);
+
+    const $ = id => document.getElementById(id);
+    let studentsCache = [];
+    let outstandingCharges = [];
+
+    function message(s, color = "black") {
+      $("fcMessage").textContent = s;
+      $("fcMessage").style.color = color;
+    }
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;",
+        '"': "&quot;", "'": "&#39;"
+      })[c]);
+    }
+
+    function money(n) {
+      return Number(n || 0).toLocaleString("en-IN", {
+        maximumFractionDigits: 2
+      });
+    }
+
+    $("fcDate").value = new Date().toLocaleDateString("en-CA");
+
+    $("fcOpen").onclick = async () => {
+      $("fcArea").style.display = "block";
+      await loadInstitutions();
+    };
+
+    $("fcInstitution").onchange = loadSessions;
+    $("fcSession").onchange = loadStudents;
+    $("fcLoadDue").onclick = loadOutstanding;
+    $("fcSearch").oninput = filterStudents;
+
+    async function loadInstitutions() {
+      message("Loading institutions...");
+      const { data: auth } = await db.auth.getUser();
+      if (!auth?.user) return message("Please login again.", "red");
+
+      const { data: profile, error: pe } = await db
+        .from("user_profiles")
+        .select("role,institution_id")
+        .eq("user_id", auth.user.id)
+        .single();
+
+      if (pe || !profile) return message("Profile error: " + (pe?.message || ""), "red");
+
+      let q = db.from("institutions").select("id,name").order("name");
+      if (!String(profile.role).toLowerCase().includes("super")) {
+        q = q.eq("id", profile.institution_id);
+      }
+
+      const { data, error } = await q;
+      if (error) return message("Institution error: " + error.message, "red");
+
+      $("fcInstitution").innerHTML = (data || []).map(x =>
+        `<option value="${x.id}">${esc(x.name)}</option>`
+      ).join("");
+
+      if (!data?.length) return message("Institution nahi mila.", "red");
+      await loadSessions();
+    }
+
+    async function loadSessions() {
+      const iid = $("fcInstitution").value;
+      const { data, error } = await db.from("academic_sessions")
+        .select("id,session_name")
+        .eq("institution_id", iid)
+        .order("session_name", { ascending: false });
+
+      if (error) return message("Session error: " + error.message, "red");
+
+      $("fcSession").innerHTML = (data || []).map(x =>
+        `<option value="${x.id}">${esc(x.session_name)}</option>`
+      ).join("");
+
+      await loadStudents();
+    }
+
+    async function loadStudents() {
+      const iid = $("fcInstitution").value;
+      const sid = $("fcSession").value;
+      if (!iid || !sid) return;
+
+      const { data, error } = await db.from("students")
+        .select("id,admission_no,full_name")
+        .eq("institution_id", iid)
+        .eq("session_id", sid)
+        .eq("active", true)
+        .order("full_name");
+
+      if (error) return message("Student error: " + error.message, "red");
+
+      studentsCache = data || [];
+      filterStudents();
+      $("fcDueList").innerHTML = "";
+      $("fcDueSummary").innerHTML = "";
+      outstandingCharges = [];
+      message("Students loaded. Select a student.", "green");
+    }
+
+    function filterStudents() {
+      const term = $("fcSearch").value.trim().toLowerCase();
+      const filtered = studentsCache.filter(s =>
+        (s.full_name || "").toLowerCase().includes(term) ||
+        (s.admission_no || "").toLowerCase().includes(term)
+      );
+
+      $("fcStudent").innerHTML = '<option value="">Select Student</option>' +
+        filtered.map(s =>
+          `<option value="${s.id}">${esc(s.admission_no)} - ${esc(s.full_name)}</option>`
+        ).join("");
+    }
+
+    async function loadOutstanding() {
+      const iid = $("fcInstitution").value;
+      const sid = $("fcSession").value;
+      const studentId = $("fcStudent").value;
+
+      if (!studentId) return message("Student select karein.", "red");
+
+      message("Outstanding fees load ho rahi hain...");
+      $("fcCollect").disabled = true;
+      $("fcReceiptResult").innerHTML = "";
+
+      try {
+        const { data: charges, error: ce } = await db.from("student_charges")
+          .select("id,fee_head_id,description,amount,due_date,frequency,period_start,period_end")
+          .eq("institution_id", iid)
+          .eq("session_id", sid)
+          .eq("student_id", studentId)
+          .order("due_date");
+
+        if (ce) throw ce;
+
+        if (!charges?.length) {
+          outstandingCharges = [];
+          $("fcDueList").innerHTML = "Is student ki koi Fee Due nahi hai.";
+          $("fcDueSummary").innerHTML = "";
+          return message("No outstanding fees found.", "orange");
+        }
+
+        const chargeIds = charges.map(x => x.id);
+        const headIds = [...new Set(charges.map(x => x.fee_head_id))];
+
+        const [allocResult, headResult] = await Promise.all([
+          db.from("payment_allocations")
+            .select("charge_id,amount")
+            .eq("institution_id", iid)
+            .in("charge_id", chargeIds),
+
+          db.from("fee_heads")
+            .select("id,name")
+            .in("id", headIds)
+        ]);
+
+        if (allocResult.error) throw allocResult.error;
+        if (headResult.error) throw headResult.error;
+
+        const paidMap = {};
+        (allocResult.data || []).forEach(x => {
+          paidMap[x.charge_id] = (paidMap[x.charge_id] || 0) + Number(x.amount || 0);
+        });
+
+        const headMap = Object.fromEntries(
+          (headResult.data || []).map(x => [x.id, x.name])
+        );
+
+        outstandingCharges = charges.map(c => ({
+          ...c,
+          feeHeadName: headMap[c.fee_head_id] || "Fee",
+          paid: paidMap[c.id] || 0,
+          balance: Math.max(0, Number(c.amount) - (paidMap[c.id] || 0))
+        })).filter(c => c.balance > 0.001);
+
+        const totalDue = outstandingCharges.reduce((sum, c) => sum + c.balance, 0);
+
+        $("fcDueSummary").innerHTML = `
+          <div style="padding:12px;background:#f1f5f9;border-radius:8px">
+            <b>Total Outstanding:</b> ₹${money(totalDue)}
+          </div>`;
+
+        $("fcDueList").innerHTML = outstandingCharges.length ? `
+          <table border="1" cellpadding="7" cellspacing="0"
+            style="border-collapse:collapse;width:100%;font-size:13px">
+            <tr>
+              <th>Fee Head</th><th>Description</th><th>Due Date</th>
+              <th>Total</th><th>Paid</th><th>Balance</th>
+            </tr>
+            ${outstandingCharges.map(c => `
+              <tr>
+                <td>${esc(c.feeHeadName)}</td>
+                <td>${esc(c.description)}</td>
+                <td>${esc(c.due_date)}</td>
+                <td>₹${money(c.amount)}</td>
+                <td>₹${money(c.paid)}</td>
+                <td><b>₹${money(c.balance)}</b></td>
+              </tr>
+            `).join("")}
+          </table>
+        ` : "No outstanding balance.";
+
+        $("fcCollect").disabled = !outstandingCharges.length;
+        message("Outstanding fees loaded.", "green");
+
+      } catch (e) {
+        message("Error: " + (e.message || e), "red");
+      }
+    }
+
+    $("fcCollect").onclick = async () => {
+      const iid = $("fcInstitution").value;
+      const studentId = $("fcStudent").value;
+      const amount = Number($("fcAmount").value);
+      const date = $("fcDate").value;
+      const mode = $("fcMode").value;
+      const reference = $("fcReference").value.trim() || null;
+      const remarks = $("fcRemarks").value.trim() || null;
+
+      const totalDue = outstandingCharges.reduce((sum, c) => sum + c.balance, 0);
+
+      if (!studentId || !outstandingCharges.length) {
+        return message("Pehle student ki Outstanding Fees load karein.", "red");
+      }
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return message("Valid payment amount enter karein.", "red");
+      }
+      if (amount > totalDue + 0.001) {
+        return message("Payment amount outstanding balance se zyada hai.", "red");
+      }
+      if (!date) return message("Payment date select karein.", "red");
+
+      const student = studentsCache.find(s => s.id === studentId);
+      if (!confirm(
+        `Student: ${student?.full_name || ""}\nPayment: ₹${money(amount)}\nMode: ${mode}\n\nPayment confirm karein?`
+      )) return;
+
+      $("fcCollect").disabled = true;
+      message("Payment save ho raha hai...");
+
+      try {
+        let remaining = amount;
+        const allocations = [];
+
+        for (const charge of outstandingCharges) {
+          if (remaining <= 0.001) break;
+          const part = Math.min(remaining, charge.balance);
+          if (part > 0) {
+            allocations.push({
+              charge_id: charge.id,
+              amount: Math.round(part * 100) / 100
+            });
+            remaining = Math.round((remaining - part) * 100) / 100;
+          }
+        }
+
+        if (remaining > 0.001) {
+          throw new Error("Payment allocation calculate nahi ho paya.");
+        }
+
+        const { data, error } = await db.rpc("collect_student_fee", {
+          p_institution_id: iid,
+          p_student_id: studentId,
+          p_amount: amount,
+          p_payment_date: date,
+          p_payment_mode: mode,
+          p_transaction_ref: reference,
+          p_remarks: remarks,
+          p_allocations: allocations
+        });
+
+        if (error) throw error;
+
+        const result = Array.isArray(data) ? data[0] : data;
+        if (!result?.receipt_no) throw new Error("Payment saved, but receipt number response nahi mila. Payment history check karein; dobara submit na karein.");
+
+        $("fcAmount").value = "";
+        $("fcReference").value = "";
+        $("fcRemarks").value = "";
+
+        $("fcReceiptResult").innerHTML = `
+          <div style="margin-top:15px;padding:15px;border:2px solid #198754;border-radius:8px">
+            <h3>Payment Successful</h3>
+            <p><b>Receipt No:</b> ${esc(result.receipt_no)}</p>
+            <p><b>Student:</b> ${esc(student?.full_name || "")}</p>
+            <p><b>Admission No:</b> ${esc(student?.admission_no || "")}</p>
+            <p><b>Amount Received:</b> ₹${money(amount)}</p>
+            <p><b>Date:</b> ${esc(date)}</p>
+            <p><b>Payment Mode:</b> ${esc(mode)}</p>
+            <p>Payment record successfully saved.</p>
+          </div>`;
+
+        message("Payment successfully collected. Receipt No: " + result.receipt_no, "green");
+        await loadOutstanding();
+
+      } catch (e) {
+        message("Payment error: " + (e.message || e), "red");
+      } finally {
+        $("fcCollect").disabled = false;
+      }
+    };
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", setupFeeCollection);
+  } else {
+    setupFeeCollection();
+  }
+})();
+</script>
