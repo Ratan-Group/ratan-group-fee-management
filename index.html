@@ -3803,3 +3803,118 @@ async function initInstitutionOutstanding() {
 
 window.addEventListener("load", initInstitutionOutstanding);
 </script>
+<script>
+async function loadInstitutionOutstandingReport() {
+  const box = document.getElementById("institutionOutstandingResult");
+  const institutionId = document.getElementById("outstandingInstitution").value;
+
+  if (!institutionId) {
+    alert("Please select an institution");
+    return;
+  }
+
+  box.innerHTML = "Loading Outstanding Report...";
+
+  try {
+    const { data: charges, error: chargeError } = await db
+      .from("student_charges")
+      .select("id,student_id,amount,description,fee_head_id,session_id")
+      .eq("institution_id", institutionId);
+
+    if (chargeError) throw chargeError;
+
+    const chargeRows = charges || [];
+    const chargeIds = chargeRows.map(c => c.id);
+
+    let allocations = [];
+
+    if (chargeIds.length) {
+      const { data, error } = await db
+        .from("payment_allocations")
+        .select("charge_id,amount")
+        .in("charge_id", chargeIds);
+
+      if (error) throw error;
+      allocations = data || [];
+    }
+
+    const paidByCharge = {};
+    allocations.forEach(a => {
+      paidByCharge[a.charge_id] =
+        (paidByCharge[a.charge_id] || 0) + Number(a.amount || 0);
+    });
+
+    const studentIds = [...new Set(chargeRows.map(c => c.student_id))];
+    let students = [];
+
+    if (studentIds.length) {
+      const { data, error } = await db
+        .from("students")
+        .select("id,full_name,admission_no,class_course_id")
+        .in("id", studentIds);
+
+      if (error) throw error;
+      students = data || [];
+    }
+
+    const studentMap = {};
+    students.forEach(s => studentMap[s.id] = s);
+
+    const dueByStudent = {};
+
+    chargeRows.forEach(c => {
+      const due = Math.max(0,
+        Number(c.amount || 0) - (paidByCharge[c.id] || 0)
+      );
+
+      if (!due) return;
+
+      const student = studentMap[c.student_id];
+      if (!student) return;
+
+      if (!dueByStudent[c.student_id]) {
+        dueByStudent[c.student_id] = {
+          name: student.full_name,
+          admission: student.admission_no,
+          due: 0,
+          charges: 0
+        };
+      }
+
+      dueByStudent[c.student_id].due += due;
+      dueByStudent[c.student_id].charges++;
+    });
+
+    const rows = Object.values(dueByStudent);
+    const totalDue = rows.reduce((sum, s) => sum + s.due, 0);
+
+    box.innerHTML = `
+      <h3>Total Outstanding: ₹${totalDue.toLocaleString("en-IN")}</h3>
+      <h3>Students with Due: ${rows.length}</h3>
+      <div style="overflow-x:auto">
+        <table border="1" cellpadding="8"
+          style="border-collapse:collapse;width:100%">
+          <tr>
+            <th>Admission No.</th>
+            <th>Student Name</th>
+            <th>Due Amount</th>
+            <th>Pending Charges</th>
+          </tr>
+          ${rows.map(s => `
+            <tr>
+              <td>${escapeGroupText(s.admission)}</td>
+              <td>${escapeGroupText(s.name)}</td>
+              <td>₹${s.due.toLocaleString("en-IN")}</td>
+              <td>${s.charges}</td>
+            </tr>
+          `).join("")}
+        </table>
+      </div>
+    `;
+
+  } catch (error) {
+    console.error("Outstanding Report Error:", error);
+    box.innerHTML = "Report Error: " + escapeGroupText(error.message);
+  }
+}
+</script>
