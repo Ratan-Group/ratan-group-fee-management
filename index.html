@@ -3231,3 +3231,25 @@ function exportOutstandingCSV() {
 
 initOutstandingReport();
 </script>
+<div id="whatsappReminder" style="background:white;padding:18px;margin:15px 0;border:1px solid #ddd;border-radius:10px;">
+  <h2>WhatsApp Fee Reminder</h2>
+
+  <label>Institution</label>
+  <select id="waInstitution" style="width:100%;padding:10px;">
+    <option value="62431d2f-b277-4a9b-abd2-0c37ed1cdfb3">
+      Ratan Public School
+    </option>
+  </select>
+
+  <label>Student</label>
+  <select id="waStudent" style="width:100%;padding:10px;">
+    <option value="">Loading Students...</option>
+  </select>
+
+  <br><br>
+  <button onclick="loadWhatsAppDue()" style="padding:12px;">
+    Show Outstanding Fees
+  </button>
+
+  <div id="waReminderResult" style="margin-top:20px;"></div>
+</div>
