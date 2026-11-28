@@ -2944,3 +2944,290 @@ function exportCollectionCSV() {
   <div id="outstandingReportResult" style="margin-top:20px;"></div>
 
 </div>
+<script>
+async function initOutstandingReport() {
+  const institutionId =
+    document.getElementById("dueReportInstitution").value;
+
+  const sessionSelect =
+    document.getElementById("dueReportSession");
+
+  const classSelect =
+    document.getElementById("dueReportClass");
+
+  const { data: sessions, error: sessionError } = await db
+    .from("academic_sessions")
+    .select("id,session_name")
+    .eq("institution_id", institutionId)
+    .order("session_name", { ascending: false });
+
+  if (sessionError) {
+    sessionSelect.innerHTML = '<option value="">Session Error</option>';
+    return;
+  }
+
+  sessionSelect.innerHTML = '<option value="">Select Session</option>';
+
+  (sessions || []).forEach(s => {
+    const option = document.createElement("option");
+    option.value = s.id;
+    option.textContent = s.session_name;
+    sessionSelect.appendChild(option);
+  });
+
+  const { data: classes, error: classError } = await db
+    .from("classes_courses")
+    .select("id,name")
+    .eq("institution_id", institutionId)
+    .order("name");
+
+  if (classError) {
+    classSelect.innerHTML = '<option value="">Class Error</option>';
+    return;
+  }
+
+  classSelect.innerHTML = '<option value="">All Classes</option>';
+
+  (classes || []).forEach(c => {
+    const option = document.createElement("option");
+    option.value = c.id;
+    option.textContent = c.name;
+    classSelect.appendChild(option);
+  });
+}
+
+async function loadOutstandingReport() {
+  const institutionId =
+    document.getElementById("dueReportInstitution").value;
+
+  const sessionId =
+    document.getElementById("dueReportSession").value;
+
+  const classId =
+    document.getElementById("dueReportClass").value;
+
+  const result =
+    document.getElementById("outstandingReportResult");
+
+  if (!sessionId) {
+    result.innerHTML = "कृपया Academic Session चुनें।";
+    return;
+  }
+
+  result.innerHTML = "Loading Outstanding Report...";
+
+  let chargeQuery = db
+    .from("student_charges")
+    .select("id,student_id,amount,description,fee_head_id")
+    .eq("institution_id", institutionId)
+    .eq("session_id", sessionId);
+
+  const { data: charges, error: chargeError } = await chargeQuery;
+
+  if (chargeError) {
+    result.innerHTML = "Charge Error: " + chargeError.message;
+    return;
+  }
+
+  const { data: students, error: studentError } = await db
+    .from("students")
+    .select("id,admission_no,full_name,class_course_id")
+    .eq("institution_id", institutionId);
+
+  if (studentError) {
+    result.innerHTML = "Student Error: " + studentError.message;
+    return;
+  }
+
+  const { data: allocations, error: allocationError } = await db
+    .from("payment_allocations")
+    .select("charge_id,amount")
+    .eq("institution_id", institutionId);
+
+  if (allocationError) {
+    result.innerHTML = "Payment Error: " + allocationError.message;
+    return;
+  }
+
+  const paidMap = {};
+  (allocations || []).forEach(a => {
+    paidMap[a.charge_id] =
+      (paidMap[a.charge_id] || 0) + Number(a.amount || 0);
+  });
+
+  const studentMap = {};
+  (students || []).forEach(s => {
+    studentMap[s.id] = s;
+  });
+
+  const { data: classData, error: classesError } = await db
+    .from("classes_courses")
+    .select("id,name")
+    .eq("institution_id", institutionId);
+
+  if (classesError) {
+    result.innerHTML = "Class Error: " + classesError.message;
+    return;
+  }
+
+  const classMap = {};
+  (classData || []).forEach(c => {
+    classMap[c.id] = c.name;
+  });
+
+  const dueRows = [];
+  let totalDue = 0;
+
+  (charges || []).forEach(c => {
+    const student = studentMap[c.student_id];
+
+    if (!student) return;
+    if (classId && student.class_course_id !== classId) return;
+
+    const paid = paidMap[c.id] || 0;
+    const balance = Math.max(0, Number(c.amount) - paid);
+
+    if (balance > 0) {
+      totalDue += balance;
+
+      dueRows.push({
+        admission: student.admission_no,
+        name: student.full_name,
+        className: classMap[student.class_course_id] || "",
+        fee: Number(c.amount),
+        paid: paid,
+        due: balance
+      });
+    }
+  });
+
+  let classSummary = {};
+
+  dueRows.forEach(r => {
+    const key = r.className || "Other";
+    classSummary[key] = (classSummary[key] || 0) + r.due;
+  });
+
+  let html = `
+    <h3>Total Outstanding: ₹${totalDue.toFixed(2)}</h3>
+    <p>Total Due Entries: ${dueRows.length}</p>
+
+    <h3>Class-wise Outstanding</h3>
+    <div style="overflow-x:auto;">
+    <table border="1" cellpadding="8" style="width:100%;border-collapse:collapse;">
+      <tr><th>Class</th><th>Outstanding Amount</th></tr>
+  `;
+
+  Object.keys(classSummary).forEach(name => {
+    html += `<tr><td>${name}</td>
+      <td>₹${classSummary[name].toFixed(2)}</td></tr>`;
+  });
+
+  html += `
+    </table>
+    </div>
+    <h3>Student-wise Due List</h3>
+    <div style="overflow-x:auto;">
+    <table border="1" cellpadding="8" style="width:100%;border-collapse:collapse;">
+      <tr>
+        <th>Admission No.</th>
+        <th>Student</th>
+        <th>Class</th>
+        <th>Total Fee</th>
+        <th>Paid</th>
+        <th>Balance Due</th>
+      </tr>
+  `;
+
+  dueRows.forEach(r => {
+    html += `
+      <tr>
+        <td>${r.admission}</td>
+        <td>${r.name}</td>
+        <td>${r.className}</td>
+        <td>₹${r.fee.toFixed(2)}</td>
+        <td>₹${r.paid.toFixed(2)}</td>
+        <td>₹${r.due.toFixed(2)}</td>
+      </tr>
+    `;
+  });
+
+  html += `
+    </table>
+    </div>
+    <br>
+    <button onclick="printOutstandingReport()">Print Report</button>
+    <button onclick="exportOutstandingCSV()">Export Excel (CSV)</button>
+  `;
+
+  result.innerHTML = html;
+  window.outstandingReportRows = dueRows;
+}
+
+function printOutstandingReport() {
+  const content =
+    document.getElementById("outstandingReportResult").innerHTML;
+
+  const w = window.open("", "_blank");
+  if (!w) {
+    alert("Popup allow करें।");
+    return;
+  }
+
+  w.document.write(`
+    <html><head><title>Outstanding Fee Report</title>
+    <style>
+      body{font-family:Arial;padding:20px}
+      table{width:100%;border-collapse:collapse}
+      th,td{border:1px solid #333;padding:7px}
+      button{display:none}
+    </style></head><body>${content}</body></html>
+  `);
+
+  w.document.close();
+  w.print();
+}
+
+function exportOutstandingCSV() {
+  const rows = window.outstandingReportRows || [];
+
+  if (!rows.length) {
+    alert("पहले Outstanding Report Generate करें।");
+    return;
+  }
+
+  const headers = [
+    "Admission No",
+    "Student",
+    "Class",
+    "Total Fee",
+    "Paid",
+    "Balance Due"
+  ];
+
+  const csv = [
+    headers.join(","),
+    ...rows.map(r => [
+      r.admission,
+      r.name,
+      r.className,
+      r.fee,
+      r.paid,
+      r.due
+    ].map(v => '"' + String(v ?? "").replace(/"/g, '""') + '"').join(","))
+  ].join("\n");
+
+  const blob = new Blob(["\uFEFF" + csv], {
+    type: "text/csv;charset=utf-8;"
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "Ratan_Outstanding_Fee_Report.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+initOutstandingReport();
+</script>
