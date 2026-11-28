@@ -4299,3 +4299,119 @@ async function exportInstitutionOutstanding() {
   }
 }
 </script>
+async function exportClassOutstanding() {
+  try {
+    const institutionId = document.getElementById("classOutstandingInstitution").value;
+    if (!institutionId) {
+      alert("Please select an institution");
+      return;
+    }
+
+    const { data: inst, error: instError } = await db
+      .from("institutions")
+      .select("name")
+      .eq("id", institutionId)
+      .single();
+
+    if (instError) throw instError;
+
+    const { data: charges, error: chargeError } = await db
+      .from("student_charges")
+      .select("id, student_id, class_course_id, amount")
+      .eq("institution_id", institutionId);
+
+    if (chargeError) throw chargeError;
+
+    const chargeIds = (charges || []).map(c => c.id);
+    let allocations = [];
+
+    if (chargeIds.length) {
+      const { data, error } = await db
+        .from("payment_allocations")
+        .select("charge_id, amount")
+        .in("charge_id", chargeIds);
+
+      if (error) throw error;
+      allocations = data || [];
+    }
+
+    const { data: students, error: studentError } = await db
+      .from("students")
+      .select("id, class_course_id")
+      .eq("institution_id", institutionId);
+
+    if (studentError) throw studentError;
+
+    const { data: classes, error: classError } = await db
+      .from("classes_courses")
+      .select("id, name")
+      .eq("institution_id", institutionId);
+
+    if (classError) throw classError;
+
+    const paidByCharge = {};
+    allocations.forEach(a => {
+      paidByCharge[a.charge_id] =
+        (paidByCharge[a.charge_id] || 0) + Number(a.amount || 0);
+    });
+
+    const classTotals = {};
+
+    (charges || []).forEach(c => {
+      const due = Math.max(
+        0,
+        Number(c.amount || 0) - (paidByCharge[c.id] || 0)
+      );
+
+      if (due <= 0) return;
+
+      const classId = c.class_course_id ||
+        (students || []).find(s => s.id === c.student_id)?.class_course_id;
+
+      const className =
+        (classes || []).find(x => x.id === classId)?.name || "Other";
+
+      if (!classTotals[className]) {
+        classTotals[className] = { students: new Set(), due: 0 };
+      }
+
+      classTotals[className].students.add(c.student_id);
+      classTotals[className].due += due;
+    });
+
+    const rows = [
+      ["Institution", "Class/Course", "Students With Due", "Outstanding Amount"]
+    ];
+
+    Object.entries(classTotals).forEach(([name, item]) => {
+      rows.push([
+        inst.name,
+        name,
+        item.students.size,
+        item.due.toFixed(2)
+      ]);
+    });
+
+    const csv = "\uFEFF" + rows.map(row =>
+      row.map(value =>
+        '"' + String(value).replace(/"/g, '""') + '"'
+      ).join(",")
+    ).join("\n");
+
+    const blob = new Blob([csv], {
+      type: "text/csv;charset=utf-8;"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "Ratan_Classwise_Outstanding_Report.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+
+    alert("Class-wise Outstanding Excel Report downloaded!");
+  } catch (error) {
+    alert("Export Error: " + error.message);
+    console.error(error);
+  }
+}
