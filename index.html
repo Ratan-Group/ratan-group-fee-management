@@ -3919,3 +3919,19 @@ async function loadInstitutionOutstandingReport() {
   }
 }
 </script>
+<div id="classOutstandingPanel" style="background:white;padding:20px;margin:15px 0;border:1px solid #ddd;border-radius:10px;">
+  <h2>Class / Course-wise Outstanding Report</h2>
+
+  <label>Select Institution</label>
+  <select id="classOutstandingInstitution" style="width:100%;padding:10px;margin:10px 0;">
+    <option value="">Select Institution</option>
+  </select>
+
+  <button onclick="loadClassOutstandingReport()" style="padding:12px;">
+    Generate Class-wise Report
+  </button>
+
+  <div id="classOutstandingResult" style="margin-top:20px;">
+    Select Institution and Generate Report.
+  </div>
+</div>
