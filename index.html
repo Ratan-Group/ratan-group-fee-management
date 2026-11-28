@@ -3491,6 +3491,8 @@ async function loadGroupDashboard() {
     if (failed) throw failed.error;
 
     const institutions = instRes.data || [];
+    console.log("Institution Result:", instRes);
+console.log("Current User:", await db.auth.getUser());
     const payments = payRes.data || [];
     const charges = chargeRes.data || [];
     const allocations = allocRes.data || [];
