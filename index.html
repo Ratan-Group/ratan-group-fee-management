@@ -3963,3 +3963,130 @@ async function initClassOutstandingInstitution() {
 
 initClassOutstandingInstitution();
 </script>
+<script>
+async function loadClassOutstandingReport() {
+  const box = document.getElementById("classOutstandingResult");
+  const institutionId =
+    document.getElementById("classOutstandingInstitution").value;
+
+  if (!institutionId) {
+    alert("Please select an institution");
+    return;
+  }
+
+  box.innerHTML = "Generating Class-wise Report...";
+
+  try {
+    const { data: charges, error: chargeError } = await db
+      .from("student_charges")
+      .select("id,student_id,amount")
+      .eq("institution_id", institutionId);
+
+    if (chargeError) throw chargeError;
+
+    const chargeRows = charges || [];
+    const chargeIds = chargeRows.map(c => c.id);
+
+    let allocations = [];
+
+    if (chargeIds.length) {
+      const { data, error } = await db
+        .from("payment_allocations")
+        .select("charge_id,amount")
+        .in("charge_id", chargeIds);
+
+      if (error) throw error;
+      allocations = data || [];
+    }
+
+    const paidByCharge = {};
+    allocations.forEach(a => {
+      paidByCharge[a.charge_id] =
+        (paidByCharge[a.charge_id] || 0) + Number(a.amount || 0);
+    });
+
+    const studentIds = [...new Set(chargeRows.map(c => c.student_id))];
+    let students = [];
+
+    if (studentIds.length) {
+      const { data, error } = await db
+        .from("students")
+        .select("id,full_name,class_course_id")
+        .in("id", studentIds);
+
+      if (error) throw error;
+      students = data || [];
+    }
+
+    const { data: classes, error: classError } = await db
+      .from("classes_courses")
+      .select("id,name")
+      .eq("institution_id", institutionId);
+
+    if (classError) throw classError;
+
+    const classMap = {};
+    (classes || []).forEach(c => classMap[c.id] = c.name);
+
+    const studentMap = {};
+    students.forEach(s => studentMap[s.id] = s);
+
+    const summary = {};
+
+    chargeRows.forEach(c => {
+      const student = studentMap[c.student_id];
+      if (!student) return;
+
+      const due = Math.max(
+        0,
+        Number(c.amount || 0) - (paidByCharge[c.id] || 0)
+      );
+
+      if (due <= 0) return;
+
+      const classId = student.class_course_id || "unknown";
+      const className = classMap[classId] || "Class Not Assigned";
+
+      if (!summary[classId]) {
+        summary[classId] = {
+          name: className,
+          students: new Set(),
+          due: 0
+        };
+      }
+
+      summary[classId].students.add(student.id);
+      summary[classId].due += due;
+    });
+
+    const rows = Object.values(summary);
+    const totalDue = rows.reduce((sum, r) => sum + r.due, 0);
+
+    box.innerHTML = `
+      <h3>Total Outstanding: ₹${totalDue.toLocaleString("en-IN")}</h3>
+      <h3>Classes / Courses with Due: ${rows.length}</h3>
+      <div style="overflow-x:auto">
+        <table border="1" cellpadding="8"
+          style="border-collapse:collapse;width:100%">
+          <tr>
+            <th>Class / Course</th>
+            <th>Students with Due</th>
+            <th>Total Outstanding</th>
+          </tr>
+          ${rows.map(r => `
+            <tr>
+              <td>${escapeGroupText(r.name)}</td>
+              <td>${r.students.size}</td>
+              <td>₹${r.due.toLocaleString("en-IN")}</td>
+            </tr>
+          `).join("")}
+        </table>
+      </div>
+    `;
+
+  } catch (error) {
+    console.error("Class Outstanding Error:", error);
+    box.innerHTML = "Report Error: " + escapeGroupText(error.message);
+  }
+}
+</script>
