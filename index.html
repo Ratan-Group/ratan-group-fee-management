@@ -2700,3 +2700,24 @@ function printFeeReceipt() {
   w.print();
 }
             </script>
+<div id="feeReports" style="background:white;padding:18px;margin:15px 0;border:1px solid #ddd;border-radius:10px;">
+  <h2>Fee Collection Reports</h2>
+
+  <label>Institution</label>
+  <select id="reportInstitution" style="width:100%;padding:10px;">
+    <option value="62431d2f-b277-4a9b-abd2-0c37ed1cdfb3">Ratan Public School</option>
+  </select>
+
+  <label>From Date</label>
+  <input type="date" id="reportFrom" style="width:100%;padding:10px;">
+
+  <label>To Date</label>
+  <input type="date" id="reportTo" style="width:100%;padding:10px;">
+
+  <br><br>
+  <button onclick="loadFeeReport()" style="padding:12px;">
+    Generate Report
+  </button>
+
+  <div id="feeReportResult" style="margin-top:20px;"></div>
+</div>
