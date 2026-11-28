@@ -2763,24 +2763,4 @@ function printFeeReceipt() {
   w.focus();
   w.print();
 }
- {
-  const content = document.getElementById("printReceipt").innerHTML;
-  const w = window.open("", "_blank");
-  if (!w) {
-    alert("Popup blocked. कृपया browser में popups allow करें।");
-    return;
-  }
-  w.document.write(`
-    <html><head><title>Fee Receipt</title>
-    <style>
-      body{font-family:Arial,sans-serif;padding:20px;color:#111}
-      table{width:100%;border-collapse:collapse}
-      th,td{border:1px solid #222;padding:8px;text-align:left}
-      @media print{body{padding:0}}
-    </style></head><body>${content}</body></html>
-  `);
-  w.document.close();
-  w.focus();
-  w.print();
-}
 </script>
