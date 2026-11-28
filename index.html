@@ -3479,7 +3479,7 @@ async function loadGroupDashboard() {
   try {
     const [instRes, payRes, chargeRes, allocRes, studentRes] =
       await Promise.all([
-        db.from("institutions").select("id,institution_name"),
+        db.from("institutions").select("id,name"),
         db.from("payments").select("institution_id,amount"),
         db.from("student_charges").select("id,institution_id,amount"),
         db.from("payment_allocations").select("charge_id,amount"),
@@ -3526,7 +3526,7 @@ async function loadGroupDashboard() {
 
       return `
         <tr>
-          <td>${escapeGroupText(inst.institution_name)}</td>
+          <td>${escapeGroupText(inst.name)}</td>
           <td>₹${collection.toLocaleString("en-IN")}</td>
           <td>₹${outstanding.toLocaleString("en-IN")}</td>
           <td>${studentCount}</td>
