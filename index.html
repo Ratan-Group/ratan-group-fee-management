@@ -3568,3 +3568,25 @@ function escapeGroupText(value) {
   })[ch]);
 }
 </script>
+<div id="institutionDetailedReport" style="background:white;padding:20px;margin:15px 0;border:1px solid #ddd;border-radius:10px;">
+  <h2>Institution-wise Detailed Report</h2>
+
+  <label>Select Institution</label>
+  <select id="detailInstitution" style="width:100%;padding:10px;margin:10px 0;">
+    <option value="">Loading Institutions...</option>
+  </select>
+
+  <label>From Date</label>
+  <input type="date" id="detailFromDate" style="width:100%;padding:10px;margin:8px 0;">
+
+  <label>To Date</label>
+  <input type="date" id="detailToDate" style="width:100%;padding:10px;margin:8px 0;">
+
+  <button onclick="loadInstitutionDetailedReport()" style="padding:12px;">
+    Generate Detailed Report
+  </button>
+
+  <div id="institutionDetailedResult" style="margin-top:20px;">
+    Select Institution and Generate Report.
+  </div>
+</div>
