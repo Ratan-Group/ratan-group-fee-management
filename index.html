@@ -4171,3 +4171,127 @@ async function exportInstitutionReport() {
   }
 }
 </script>
+<script>
+async function exportInstitutionOutstanding() {
+  const institutionId =
+    document.getElementById("outstandingInstitution").value;
+
+  if (!institutionId) {
+    alert("Please select an institution");
+    return;
+  }
+
+  try {
+    const { data: institution, error: instError } = await db
+      .from("institutions")
+      .select("name")
+      .eq("id", institutionId)
+      .single();
+
+    if (instError) throw instError;
+
+    const { data: charges, error: chargeError } = await db
+      .from("student_charges")
+      .select("id,student_id,amount,description")
+      .eq("institution_id", institutionId);
+
+    if (chargeError) throw chargeError;
+
+    const chargeRows = charges || [];
+    const chargeIds = chargeRows.map(c => c.id);
+
+    let allocations = [];
+
+    if (chargeIds.length) {
+      const { data, error } = await db
+        .from("payment_allocations")
+        .select("charge_id,amount")
+        .in("charge_id", chargeIds);
+
+      if (error) throw error;
+      allocations = data || [];
+    }
+
+    const paidByCharge = {};
+    allocations.forEach(a => {
+      paidByCharge[a.charge_id] =
+        (paidByCharge[a.charge_id] || 0) + Number(a.amount || 0);
+    });
+
+    const studentIds = [...new Set(chargeRows.map(c => c.student_id))];
+    let students = [];
+
+    if (studentIds.length) {
+      const { data, error } = await db
+        .from("students")
+        .select("id,full_name,admission_no")
+        .in("id", studentIds);
+
+      if (error) throw error;
+      students = data || [];
+    }
+
+    const studentMap = {};
+    students.forEach(s => studentMap[s.id] = s);
+
+    const dueByStudent = {};
+
+    chargeRows.forEach(c => {
+      const due = Math.max(
+        0,
+        Number(c.amount || 0) - (paidByCharge[c.id] || 0)
+      );
+
+      if (due <= 0) return;
+
+      const student = studentMap[c.student_id];
+      if (!student) return;
+
+      if (!dueByStudent[c.student_id]) {
+        dueByStudent[c.student_id] = {
+          name: student.full_name,
+          admission: student.admission_no,
+          due: 0
+        };
+      }
+
+      dueByStudent[c.student_id].due += due;
+    });
+
+    const rows = [
+      ["Institution", institution.name],
+      [],
+      ["Admission No", "Student Name", "Outstanding Amount"]
+    ];
+
+    Object.values(dueByStudent).forEach(s => {
+      rows.push([s.admission, s.name, s.due]);
+    });
+
+    const csv = "\uFEFF" + rows.map(row =>
+      row.map(value =>
+        '"' + String(value ?? "").replace(/"/g, '""') + '"'
+      ).join(",")
+    ).join("\r\n");
+
+    const blob = new Blob([csv], {
+      type: "text/csv;charset=utf-8;"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "Ratan_Outstanding_Report.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    alert("Outstanding Excel Report downloaded!");
+
+  } catch (error) {
+    console.error("Outstanding Export Error:", error);
+    alert("Export Error: " + error.message);
+  }
+}
+</script>
