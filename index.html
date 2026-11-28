@@ -3764,7 +3764,9 @@ async function loadInstitutionDetailedReport() {
 </script>
 <div id="institutionOutstandingPanel" style="background:white;padding:20px;margin:15px 0;border:1px solid #ddd;border-radius:10px;">
   <h2>Institution-wise Outstanding Fees Report</h2>
-
+<button onclick="exportInstitutionOutstanding()" style="padding:12px;margin:8px;">
+  Download Outstanding Excel
+</button>
   <label>Select Institution</label>
   <select id="outstandingInstitution" style="width:100%;padding:10px;margin:10px 0;">
     <option value="">Select Institution</option>
