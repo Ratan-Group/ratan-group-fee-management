@@ -2910,3 +2910,37 @@ function exportCollectionCSV() {
   URL.revokeObjectURL(url);
 }
 </script>
+<div id="outstandingReport" style="background:white;padding:18px;margin:15px 0;border:1px solid #ddd;border-radius:10px;">
+
+  <h2>Outstanding Fee Report</h2>
+
+  <label>Institution</label>
+  <select id="dueReportInstitution" style="width:100%;padding:10px;">
+    <option value="62431d2f-b277-4a9b-abd2-0c37ed1cdfb3">
+      Ratan Public School
+    </option>
+  </select>
+
+  <br><br>
+
+  <label>Academic Session</label>
+  <select id="dueReportSession" style="width:100%;padding:10px;">
+    <option value="">Loading Session...</option>
+  </select>
+
+  <br><br>
+
+  <label>Class</label>
+  <select id="dueReportClass" style="width:100%;padding:10px;">
+    <option value="">All Classes</option>
+  </select>
+
+  <br><br>
+
+  <button onclick="loadOutstandingReport()" style="padding:12px;">
+    Generate Outstanding Report
+  </button>
+
+  <div id="outstandingReportResult" style="margin-top:20px;"></div>
+
+</div>
