@@ -3651,3 +3651,36 @@ async function initInstitutionDetailedReport() {
 
 initInstitutionDetailedReport();
 </script>
+<script>
+async function initInstitutionDetailedReport() {
+  const select = document.getElementById("detailInstitution");
+
+  if (!select) return;
+
+  try {
+    const result = await db
+      .from("institutions")
+      .select("id,name")
+      .order("name");
+
+    console.log("Institution Dropdown Result:", result);
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    select.innerHTML = '<option value="">Select Institution</option>';
+
+    result.data.forEach(inst => {
+      select.add(new Option(inst.name, inst.id));
+    });
+
+  } catch (error) {
+    console.error("Institution Dropdown Error:", error);
+    select.innerHTML = '<option value="">Loading Error</option>';
+    alert("Institution Error: " + error.message);
+  }
+}
+
+window.addEventListener("load", initInstitutionDetailedReport);
+</script>
