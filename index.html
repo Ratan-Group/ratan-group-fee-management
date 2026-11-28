@@ -2721,3 +2721,192 @@ function printFeeReceipt() {
 
   <div id="feeReportResult" style="margin-top:20px;"></div>
 </div>
+<script>
+async function loadFeeReport() {
+  const institutionId =
+    document.getElementById("reportInstitution").value;
+
+  const fromDate =
+    document.getElementById("reportFrom").value;
+
+  const toDate =
+    document.getElementById("reportTo").value;
+
+  const result =
+    document.getElementById("feeReportResult");
+
+  if (!fromDate || !toDate) {
+    result.innerHTML = "कृपया From Date और To Date चुनें।";
+    return;
+  }
+
+  if (fromDate > toDate) {
+    result.innerHTML = "From Date, To Date से पहले होनी चाहिए।";
+    return;
+  }
+
+  result.innerHTML = "Report Loading...";
+
+  const { data: payments, error } = await db
+    .from("payments")
+    .select("*")
+    .eq("institution_id", institutionId)
+    .gte("payment_date", fromDate)
+    .lte("payment_date", toDate)
+    .order("payment_date", { ascending: false });
+
+  if (error) {
+    result.innerHTML = "Error: " + error.message;
+    return;
+  }
+
+  const { data: students, error: studentError } = await db
+    .from("students")
+    .select("id,admission_no,full_name,class_course_id")
+    .eq("institution_id", institutionId);
+
+  if (studentError) {
+    result.innerHTML = "Error: " + studentError.message;
+    return;
+  }
+
+  const rows = payments || [];
+  const studentList = students || [];
+
+  const total = rows.reduce(
+    (sum, p) => sum + Number(p.amount || 0), 0
+  );
+
+  const modes = {};
+  rows.forEach(p => {
+    const mode = p.payment_mode || "Other";
+    modes[mode] = (modes[mode] || 0) + Number(p.amount || 0);
+  });
+
+  let html = `
+    <h3>Fee Collection Report</h3>
+    <p>From: ${fromDate} &nbsp; To: ${toDate}</p>
+
+    <h3>Total Collection: ₹${total.toFixed(2)}</h3>
+    <p>Total Transactions: ${rows.length}</p>
+
+    <h4>Payment Mode Summary</h4>
+    <table border="1" cellpadding="8" style="width:100%;border-collapse:collapse;">
+      <tr><th>Payment Mode</th><th>Amount</th></tr>
+  `;
+
+  Object.keys(modes).forEach(mode => {
+    html += `<tr><td>${mode}</td>
+      <td>₹${modes[mode].toFixed(2)}</td></tr>`;
+  });
+
+  html += `
+    </table>
+    <h4>Payment Details</h4>
+    <div style="overflow-x:auto;">
+    <table border="1" cellpadding="8" style="width:100%;border-collapse:collapse;">
+      <tr>
+        <th>Date</th>
+        <th>Receipt No.</th>
+        <th>Admission No.</th>
+        <th>Student Name</th>
+        <th>Mode</th>
+        <th>Amount</th>
+      </tr>
+  `;
+
+  rows.forEach(p => {
+    const s = studentList.find(x => x.id === p.student_id);
+
+    html += `
+      <tr>
+        <td>${p.payment_date || ""}</td>
+        <td>${p.receipt_no || ""}</td>
+        <td>${s ? s.admission_no : ""}</td>
+        <td>${s ? s.full_name : ""}</td>
+        <td>${p.payment_mode || ""}</td>
+        <td>₹${Number(p.amount).toFixed(2)}</td>
+      </tr>
+    `;
+  });
+
+  html += `
+    </table>
+    </div>
+    <br>
+    <button onclick="printCollectionReport()">Print Report</button>
+    <button onclick="exportCollectionCSV()">Export Excel (CSV)</button>
+  `;
+
+  result.innerHTML = html;
+
+  window.lastFeeReport = rows.map(p => {
+    const s = studentList.find(x => x.id === p.student_id);
+    return {
+      Date: p.payment_date,
+      Receipt: p.receipt_no,
+      Admission: s ? s.admission_no : "",
+      Student: s ? s.full_name : "",
+      Mode: p.payment_mode,
+      Amount: Number(p.amount)
+    };
+  });
+}
+
+function printCollectionReport() {
+  const content =
+    document.getElementById("feeReportResult").innerHTML;
+
+  const w = window.open("", "_blank");
+
+  if (!w) {
+    alert("Browser में popup allow करें।");
+    return;
+  }
+
+  w.document.write(`
+    <html><head><title>Fee Collection Report</title>
+    <style>
+      body {font-family:Arial;padding:20px}
+      table {width:100%;border-collapse:collapse}
+      th,td {border:1px solid #333;padding:7px}
+      button {display:none}
+    </style>
+    </head><body>${content}</body></html>
+  `);
+
+  w.document.close();
+  w.print();
+}
+
+function exportCollectionCSV() {
+  const rows = window.lastFeeReport || [];
+
+  if (!rows.length) {
+    alert("पहले Report Generate करें।");
+    return;
+  }
+
+  const headers = Object.keys(rows[0]);
+
+  const csv = [
+    headers.join(","),
+    ...rows.map(row =>
+      headers.map(h =>
+        '"' + String(row[h] ?? "").replace(/"/g, '""') + '"'
+      ).join(",")
+    )
+  ].join("\n");
+
+  const blob = new Blob(["\uFEFF" + csv], {
+    type: "text/csv;charset=utf-8;"
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "Ratan_Fee_Collection_Report.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
