@@ -3914,6 +3914,7 @@ async function loadInstitutionOutstandingReport() {
 
   } catch (error) {
     console.error("Outstanding Report Error:", error);
+    alert("Report Error: " + error.message);
     box.innerHTML = "Report Error: " + escapeGroupText(error.message);
   }
 }
