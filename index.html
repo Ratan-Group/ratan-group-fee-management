@@ -3253,3 +3253,210 @@ initOutstandingReport();
 
   <div id="waReminderResult" style="margin-top:20px;"></div>
 </div>
+<script>
+async function initWhatsAppReminder() {
+  const studentSelect = document.getElementById("waStudent");
+
+  // Add Academic Session selector
+  const sessionSelect = document.createElement("select");
+  sessionSelect.id = "waSession";
+  sessionSelect.style.cssText = "width:100%;padding:10px;margin:10px 0;";
+
+  const studentLabel = document.createElement("p");
+  studentLabel.textContent = "Academic Session";
+
+  studentSelect.parentNode.insertBefore(studentLabel, studentSelect);
+  studentSelect.parentNode.insertBefore(sessionSelect, studentSelect);
+
+  const institutionId =
+    document.getElementById("waInstitution").value;
+
+  const { data: sessions, error: sessionError } = await db
+    .from("academic_sessions")
+    .select("id,session_name")
+    .eq("institution_id", institutionId)
+    .eq("active", true);
+
+  if (sessionError) {
+    sessionSelect.innerHTML = '<option value="">Session Error</option>';
+    return;
+  }
+
+  sessionSelect.innerHTML = '<option value="">Select Session</option>';
+
+  (sessions || []).forEach(s => {
+    const option = document.createElement("option");
+    option.value = s.id;
+    option.textContent = s.session_name;
+    sessionSelect.appendChild(option);
+  });
+
+  const { data: students, error } = await db
+    .from("students")
+    .select("id,admission_no,full_name,mobile,guardian_mobile")
+    .eq("institution_id", institutionId)
+    .eq("active", true)
+    .order("full_name");
+
+  if (error) {
+    studentSelect.innerHTML = '<option value="">Student Error</option>';
+    return;
+  }
+
+  studentSelect.innerHTML = '<option value="">Select Student</option>';
+
+  (students || []).forEach(s => {
+    const option = document.createElement("option");
+    option.value = s.id;
+    option.textContent = s.admission_no + " - " + s.full_name;
+    studentSelect.appendChild(option);
+  });
+}
+
+async function loadWhatsAppDue() {
+  const institutionId =
+    document.getElementById("waInstitution").value;
+
+  const sessionId =
+    document.getElementById("waSession").value;
+
+  const studentId =
+    document.getElementById("waStudent").value;
+
+  const result =
+    document.getElementById("waReminderResult");
+
+  if (!sessionId || !studentId) {
+    result.textContent = "कृपया Session और Student चुनें।";
+    return;
+  }
+
+  result.textContent = "Loading Outstanding Fees...";
+
+  const { data: student, error: studentError } = await db
+    .from("students")
+    .select("id,admission_no,full_name,mobile,guardian_mobile")
+    .eq("id", studentId)
+    .eq("institution_id", institutionId)
+    .single();
+
+  if (studentError || !student) {
+    result.textContent = "Student नहीं मिला।";
+    return;
+  }
+
+  const { data: charges, error: chargeError } = await db
+    .from("student_charges")
+    .select("id,amount")
+    .eq("institution_id", institutionId)
+    .eq("student_id", studentId)
+    .eq("session_id", sessionId);
+
+  if (chargeError) {
+    result.textContent = "Fee Error: " + chargeError.message;
+    return;
+  }
+
+  const chargeIds = (charges || []).map(c => c.id);
+
+  let allocations = [];
+
+  if (chargeIds.length) {
+    const { data, error } = await db
+      .from("payment_allocations")
+      .select("charge_id,amount")
+      .eq("institution_id", institutionId)
+      .in("charge_id", chargeIds);
+
+    if (error) {
+      result.textContent = "Payment Error: " + error.message;
+      return;
+    }
+
+    allocations = data || [];
+  }
+
+  const paidMap = {};
+
+  allocations.forEach(a => {
+    paidMap[a.charge_id] =
+      (paidMap[a.charge_id] || 0) + Number(a.amount || 0);
+  });
+
+  const totalFee = (charges || []).reduce(
+    (sum, c) => sum + Number(c.amount || 0), 0
+  );
+
+  const totalPaid = allocations.reduce(
+    (sum, a) => sum + Number(a.amount || 0), 0
+  );
+
+  const balance = Math.max(0, totalFee - totalPaid);
+
+  const phone = String(
+    student.guardian_mobile || student.mobile || ""
+  ).replace(/\D/g, "");
+
+  let message =
+    "Dear Parent,\n\n" +
+    "Student: " + student.full_name + "\n" +
+    "Admission No: " + student.admission_no + "\n" +
+    "Academic Session: " +
+    document.getElementById("waSession").selectedOptions[0].text +
+    "\n\n" +
+    "Total Fee: Rs. " + totalFee.toFixed(2) + "\n" +
+    "Paid Fee: Rs. " + totalPaid.toFixed(2) + "\n" +
+    "Balance Due: Rs. " + balance.toFixed(2) + "\n\n" +
+    "Kindly deposit the pending school fee. Thank you.\n\n" +
+    "RATAN PUBLIC SCHOOL\n" +
+    "Karai (Surwaya), Shivpuri\n" +
+    "Mobile: 94065 85209";
+
+  result.innerHTML = "";
+
+  const summary = document.createElement("div");
+  summary.textContent =
+    "Student: " + student.full_name +
+    " | Total Due: ₹" + balance.toFixed(2);
+  result.appendChild(summary);
+
+  const preview = document.createElement("textarea");
+  preview.value = message;
+  preview.readOnly = true;
+  preview.style.cssText =
+    "width:100%;height:220px;padding:10px;margin-top:12px;";
+  result.appendChild(preview);
+
+  const button = document.createElement("button");
+  button.textContent = "Open WhatsApp & Send Reminder";
+  button.style.cssText = "padding:12px;margin-top:10px;";
+
+  button.onclick = function() {
+    if (!phone) {
+      alert("इस विद्यार्थी का Mobile या Guardian Mobile Number उपलब्ध नहीं है।");
+      return;
+    }
+
+    let whatsappNumber = phone;
+
+    if (whatsappNumber.length === 10) {
+      whatsappNumber = "91" + whatsappNumber;
+    }
+
+    if (whatsappNumber.length < 11) {
+      alert("Mobile Number सही नहीं है। कृपया विद्यार्थी का नंबर जाँचें।");
+      return;
+    }
+
+    const url =
+      "https://wa.me/" + whatsappNumber +
+      "?text=" + encodeURIComponent(message);
+
+    window.open(url, "_blank");
+  };
+
+  result.appendChild(button);
+}
+
+initWhatsAppReminder();
+</script>
