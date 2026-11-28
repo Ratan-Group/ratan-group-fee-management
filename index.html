@@ -3590,3 +3590,30 @@ function escapeGroupText(value) {
     Select Institution and Generate Report.
   </div>
 </div>
+async function initInstitutionDetailedReport() {
+  const select = document.getElementById("detailInstitution");
+
+  try {
+    const { data, error } = await db
+      .from("institutions")
+      .select("id,name")
+      .order("name");
+
+    if (error) throw error;
+
+    select.innerHTML = '<option value="">Select Institution</option>';
+
+    (data || []).forEach(inst => {
+      const option = document.createElement("option");
+      option.value = inst.id;
+      option.textContent = inst.name;
+      select.appendChild(option);
+    });
+
+  } catch (error) {
+    select.innerHTML = '<option value="">Error loading institutions</option>';
+    console.error(error);
+  }
+}
+
+initInstitutionDetailedReport();
