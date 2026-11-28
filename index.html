@@ -4092,3 +4092,80 @@ async function loadClassOutstandingReport() {
   }
 }
 </script>
+<script>
+async function exportInstitutionReport() {
+  const institutionId =
+    document.getElementById("detailInstitution").value;
+  const fromDate = document.getElementById("detailFromDate").value;
+  const toDate = document.getElementById("detailToDate").value;
+
+  if (!institutionId) {
+    alert("Please select an institution");
+    return;
+  }
+
+  try {
+    const { data: institution, error: instError } = await db
+      .from("institutions")
+      .select("name")
+      .eq("id", institutionId)
+      .single();
+
+    if (instError) throw instError;
+
+    let query = db
+      .from("payments")
+      .select("payment_date,receipt_no,payment_mode,amount")
+      .eq("institution_id", institutionId)
+      .order("payment_date");
+
+    if (fromDate) query = query.gte("payment_date", fromDate);
+    if (toDate) query = query.lte("payment_date", toDate);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const rows = [
+      ["Institution", institution.name],
+      ["From Date", fromDate || "All"],
+      ["To Date", toDate || "All"],
+      [],
+      ["Payment Date", "Receipt No", "Payment Mode", "Amount"]
+    ];
+
+    (data || []).forEach(p => {
+      rows.push([
+        p.payment_date,
+        p.receipt_no,
+        p.payment_mode,
+        Number(p.amount || 0)
+      ]);
+    });
+
+    const csv = "\uFEFF" + rows.map(row =>
+      row.map(value =>
+        '"' + String(value ?? "").replace(/"/g, '""') + '"'
+      ).join(",")
+    ).join("\r\n");
+
+    const blob = new Blob([csv], {
+      type: "text/csv;charset=utf-8;"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "Ratan_Institution_Collection_Report.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    alert("Excel-compatible report downloaded successfully!");
+
+  } catch (error) {
+    console.error("Export Error:", error);
+    alert("Export Error: " + error.message);
+  }
+}
+</script>
