@@ -3684,3 +3684,79 @@ async function initInstitutionDetailedReport() {
 
 window.addEventListener("load", initInstitutionDetailedReport);
 </script>
+<script>
+async function loadInstitutionDetailedReport() {
+  const box = document.getElementById("institutionDetailedResult");
+  const institutionId = document.getElementById("detailInstitution").value;
+  const fromDate = document.getElementById("detailFromDate").value;
+  const toDate = document.getElementById("detailToDate").value;
+
+  if (!institutionId) {
+    alert("Please select an institution");
+    return;
+  }
+
+  if (fromDate && toDate && fromDate > toDate) {
+    alert("From Date cannot be after To Date");
+    return;
+  }
+
+  box.innerHTML = "Generating Report...";
+
+  try {
+    let query = db
+      .from("payments")
+      .select("id,amount,payment_date,payment_mode,receipt_no")
+      .eq("institution_id", institutionId)
+      .order("payment_date", { ascending: true });
+
+    if (fromDate) query = query.gte("payment_date", fromDate);
+    if (toDate) query = query.lte("payment_date", toDate);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const payments = data || [];
+    const total = payments.reduce(
+      (sum, p) => sum + Number(p.amount || 0), 0
+    );
+
+    const modes = {};
+    payments.forEach(p => {
+      const mode = p.payment_mode || "Other";
+      modes[mode] = (modes[mode] || 0) + Number(p.amount || 0);
+    });
+
+    let html = `
+      <h3>Total Collection: ₹${total.toLocaleString("en-IN")}</h3>
+      <h3>Total Transactions: ${payments.length}</h3>
+      <h3>Payment Mode Summary</h3>
+      <ul>
+        ${Object.entries(modes).map(([mode, amount]) =>
+          `<li>${escapeGroupText(mode)}: ₹${amount.toLocaleString("en-IN")}</li>`
+        ).join("")}
+      </ul>
+      <h3>Transaction Details</h3>
+      <div style="overflow-x:auto">
+      <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
+        <tr>
+          <th>Date</th><th>Receipt No.</th><th>Mode</th><th>Amount</th>
+        </tr>
+        ${payments.map(p => `
+          <tr>
+            <td>${escapeGroupText(p.payment_date)}</td>
+            <td>${escapeGroupText(p.receipt_no)}</td>
+            <td>${escapeGroupText(p.payment_mode)}</td>
+            <td>₹${Number(p.amount || 0).toLocaleString("en-IN")}</td>
+          </tr>
+        `).join("")}
+      </table></div>`;
+
+    box.innerHTML = html;
+
+  } catch (error) {
+    console.error("Detailed Report Error:", error);
+    box.innerHTML = "Report Error: " + escapeGroupText(error.message);
+  }
+}
+</script>
