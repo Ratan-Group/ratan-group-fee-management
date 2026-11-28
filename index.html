@@ -3471,3 +3471,98 @@ initWhatsAppReminder();
     Dashboard Loading...
   </div>
 </div>
+<script>
+async function loadGroupDashboard() {
+  const box = document.getElementById("groupDashboardResult");
+  box.innerHTML = "Loading... Please wait.";
+
+  try {
+    const [instRes, payRes, chargeRes, allocRes, studentRes] =
+      await Promise.all([
+        db.from("institutions").select("id,institution_name"),
+        db.from("payments").select("institution_id,amount"),
+        db.from("student_charges").select("id,institution_id,amount"),
+        db.from("payment_allocations").select("charge_id,amount"),
+        db.from("students").select("id,institution_id").eq("active", true)
+      ]);
+
+    const results = [instRes, payRes, chargeRes, allocRes, studentRes];
+    const failed = results.find(r => r.error);
+    if (failed) throw failed.error;
+
+    const institutions = instRes.data || [];
+    const payments = payRes.data || [];
+    const charges = chargeRes.data || [];
+    const allocations = allocRes.data || [];
+    const students = studentRes.data || [];
+
+    const paidByCharge = {};
+    allocations.forEach(a => {
+      paidByCharge[a.charge_id] =
+        (paidByCharge[a.charge_id] || 0) + Number(a.amount || 0);
+    });
+
+    let totalCollection = 0;
+    let totalOutstanding = 0;
+    let totalStudents = 0;
+
+    const rows = institutions.map(inst => {
+      const collection = payments
+        .filter(p => p.institution_id === inst.id)
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+      const outstanding = charges
+        .filter(c => c.institution_id === inst.id)
+        .reduce((sum, c) =>
+          sum + Math.max(0, Number(c.amount || 0) -
+            (paidByCharge[c.id] || 0)), 0);
+
+      const studentCount = students
+        .filter(s => s.institution_id === inst.id).length;
+
+      totalCollection += collection;
+      totalOutstanding += outstanding;
+      totalStudents += studentCount;
+
+      return `
+        <tr>
+          <td>${escapeGroupText(inst.institution_name)}</td>
+          <td>₹${collection.toLocaleString("en-IN")}</td>
+          <td>₹${outstanding.toLocaleString("en-IN")}</td>
+          <td>${studentCount}</td>
+        </tr>`;
+    }).join("");
+
+    box.innerHTML = `
+      <h3>Total Collection: ₹${totalCollection.toLocaleString("en-IN")}</h3>
+      <h3>Total Outstanding: ₹${totalOutstanding.toLocaleString("en-IN")}</h3>
+      <h3>Total Active Students: ${totalStudents}</h3>
+      <h3>Institutions: ${institutions.length}</h3>
+      <div style="overflow-x:auto;">
+        <table border="1" cellpadding="10" cellspacing="0"
+          style="border-collapse:collapse;width:100%;">
+          <thead>
+            <tr>
+              <th>Institution</th>
+              <th>Collection</th>
+              <th>Outstanding</th>
+              <th>Students</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch (error) {
+    console.error("Group Dashboard Error:", error);
+    box.innerHTML =
+      "Dashboard Error: " + escapeGroupText(error.message || "Unknown error");
+  }
+}
+
+function escapeGroupText(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;",
+    '"': "&quot;", "'": "&#39;"
+  })[ch]);
+}
+</script>
