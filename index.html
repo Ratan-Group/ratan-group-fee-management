@@ -3617,3 +3617,37 @@ async function initInstitutionDetailedReport() {
 }
 
 initInstitutionDetailedReport();
+<script>
+async function initInstitutionDetailedReport() {
+  const select = document.getElementById("detailInstitution");
+
+  if (!select) {
+    console.error("detailInstitution dropdown not found");
+    return;
+  }
+
+  try {
+    const { data, error } = await db
+      .from("institutions")
+      .select("id,name")
+      .order("name");
+
+    if (error) throw error;
+
+    select.innerHTML = '<option value="">Select Institution</option>';
+
+    (data || []).forEach(inst => {
+      const option = document.createElement("option");
+      option.value = inst.id;
+      option.textContent = inst.name;
+      select.appendChild(option);
+    });
+
+  } catch (error) {
+    select.innerHTML = '<option value="">Error loading institutions</option>';
+    console.error("Institution Report Error:", error);
+  }
+}
+
+initInstitutionDetailedReport();
+</script>
