@@ -3935,3 +3935,31 @@ async function loadInstitutionOutstandingReport() {
     Select Institution and Generate Report.
   </div>
 </div>
+<script>
+async function initClassOutstandingInstitution() {
+  const select = document.getElementById("classOutstandingInstitution");
+  if (!select) return;
+
+  try {
+    const { data, error } = await db
+      .from("institutions")
+      .select("id,name")
+      .order("name");
+
+    if (error) throw error;
+
+    select.innerHTML = '<option value="">Select Institution</option>';
+
+    (data || []).forEach(inst => {
+      select.add(new Option(inst.name, inst.id));
+    });
+
+  } catch (error) {
+    console.error("Class Institution Error:", error);
+    select.innerHTML = '<option value="">Loading Error</option>';
+    alert("Institution Error: " + error.message);
+  }
+}
+
+initClassOutstandingInstitution();
+</script>
